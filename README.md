@@ -2,6 +2,10 @@
 
 Local-only contradiction-aware temporal workflow engine for distributed systems.
 
+## Live Demo
+
+GitHub Pages: [https://henry-filgueiras.github.io/chronoflow-v0/](https://henry-filgueiras.github.io/chronoflow-v0/)
+
 ## What It Includes
 
 - React + TypeScript single-page app
@@ -111,6 +115,8 @@ The Bazel fingerprint artifact is:
 ## GitHub Pages
 
 The repo now includes GitHub Pages scaffolding in [.github/workflows/deploy-pages.yml](/Users/henry/chronoflow-v0/.github/workflows/deploy-pages.yml).
+
+Hosted demo: [https://henry-filgueiras.github.io/chronoflow-v0/](https://henry-filgueiras.github.io/chronoflow-v0/)
 
 What is already handled:
 
