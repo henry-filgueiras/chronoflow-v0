@@ -107,3 +107,27 @@ The Bazel build artifact is:
 The Bazel fingerprint artifact is:
 
 - `bazel-bin/local-stack.sha256`
+
+## GitHub Pages
+
+The repo now includes GitHub Pages scaffolding in [.github/workflows/deploy-pages.yml](/Users/henry/chronoflow-v0/.github/workflows/deploy-pages.yml).
+
+What is already handled:
+
+- Vite now supports a dedicated `PAGES_BASE_PATH` env var in [vite.config.ts](/Users/henry/chronoflow-v0/vite.config.ts)
+- the Pages workflow builds with `PAGES_BASE_PATH=auto`
+- `auto` infers `/<repo>/` from `GITHUB_REPOSITORY`
+- if the repository name ends with `.github.io`, it uses `/`
+
+What you still need to do on GitHub:
+
+1. Push the workflow file to your default branch.
+2. Open `Settings -> Pages`.
+3. Under `Build and deployment`, set `Source` to `GitHub Actions`.
+4. Let the workflow run on `main` or trigger it manually from the Actions tab.
+
+If you rename the repository later, the workflow should still build with the correct project-page base path automatically. If you want to test a Pages-style local build yourself, run:
+
+```bash
+PAGES_BASE_PATH=auto npm run build
+```

@@ -74,11 +74,41 @@ export interface TimeBounds {
   span: number;
 }
 
+export type SemanticLaneId = 'payment' | 'inventory' | 'shipment' | 'cancellation' | 'reconciliation';
+
+export interface SemanticLane {
+  id: SemanticLaneId;
+  label: string;
+  top: number;
+  center: number;
+  height: number;
+}
+
+export interface TimeBand {
+  index: number;
+  x: number;
+  width: number;
+}
+
 export interface GraphNode {
   event: EventRecord;
   x: number;
   y: number;
-  lane: number;
+  laneId: SemanticLaneId;
+  clusterId: string;
+  contradictionCount: number;
+  stackIndex: number;
+}
+
+export interface GraphCluster {
+  id: string;
+  flowId: string;
+  laneId: SemanticLaneId;
+  x1: number;
+  x2: number;
+  y: number;
+  height: number;
+  eventCount: number;
   contradictionCount: number;
 }
 
@@ -87,4 +117,21 @@ export interface GraphEdge {
   sourceId: string;
   targetId: string;
   kind: 'causal' | 'sequence';
+}
+
+export interface GraphLayout {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  lanes: SemanticLane[];
+  clusters: GraphCluster[];
+  width: number;
+  height: number;
+  bounds: TimeBounds;
+}
+
+export interface DemoScenario {
+  id: string;
+  name: string;
+  description: string;
+  events: EventRecord[];
 }
