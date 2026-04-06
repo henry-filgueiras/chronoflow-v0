@@ -1,8 +1,10 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { constraintRules, defaultScenarioId, demoScenarios, eventTypes, sampleLedger } from './data/sampleData';
+import { defaultScenarioId, defaultWorkflowDsl, demoScenarios, eventTypes, sampleLedger } from './data/sampleData';
 import { detectContradictions, deriveHypotheses, sortEvents } from './lib/engine';
 import { buildGraphLayout, buildTicks, buildTimeBands, GRAPH_LEFT_GUTTER } from './lib/graph';
+import { compileWorkflowSemantics, parseWorkflowDsl } from './lib/semanticsDsl';
 import {
+  CompiledWorkflowSemantics,
   ContradictionSeverity,
   DemoScenario,
   EventFormState,
@@ -11,10 +13,12 @@ import {
   GraphEdge,
   GraphNode,
   SemanticLaneId,
+  WorkflowRuleAst,
 } from './types';
 
 const storageKey = 'chronoflow-v0-ledger';
 const scenarioStorageKey = 'chronoflow-v0-scenario';
+const semanticsStorageKey = 'chronoflow-v0-semantics-dsl';
 const severityOrder: ContradictionSeverity[] = ['high', 'medium'];
 
 const initialFormState = (): EventFormState => ({
@@ -70,6 +74,18 @@ const eventIconIds: Record<EventType, string> = {
 
 const formatSeverity = (value: ContradictionSeverity) => value[0].toUpperCase() + value.slice(1);
 
+const formatDslRule = (rule: WorkflowRuleAst) => {
+  if (rule.kind === 'implies') {
+    return `implies ${rule.source} -> ${rule.target}`;
+  }
+
+  if (rule.kind === 'within') {
+    return `within ${rule.target} <- ${rule.source} ${rule.durationRaw}`;
+  }
+
+  return `${rule.kind} ${rule.target} <- ${rule.source}`;
+};
+
 const formatEventTime = (value: string) =>
   new Date(value).toLocaleString([], {
     month: 'short',
@@ -85,6 +101,19 @@ const safeParsePayload = (value: string) => {
     return null;
   }
 };
+
+const buildCompiledSemantics = (source: string) => {
+  const parsed = parseWorkflowDsl(source);
+  return parsed.ast ? compileWorkflowSemantics(parsed.ast, eventTypes) : null;
+};
+
+const defaultCompiledSemantics = buildCompiledSemantics(defaultWorkflowDsl);
+
+if (!defaultCompiledSemantics) {
+  throw new Error('Default workflow DSL must parse successfully.');
+}
+
+const stableDefaultSemantics: CompiledWorkflowSemantics = defaultCompiledSemantics;
 
 const EventIconDefs = () => (
   <>
@@ -168,6 +197,11 @@ function App() {
   const [formState, setFormState] = useState<EventFormState>(initialFormState);
   const [selectedContradictionId, setSelectedContradictionId] = useState<string | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [dslSource, setDslSource] = useState<string>(() => window.localStorage.getItem(semanticsStorageKey) ?? defaultWorkflowDsl);
+  const [activeSemantics, setActiveSemantics] = useState<CompiledWorkflowSemantics>(() => {
+    const savedSource = window.localStorage.getItem(semanticsStorageKey) ?? defaultWorkflowDsl;
+    return buildCompiledSemantics(savedSource) ?? stableDefaultSemantics;
+  });
   const [formError, setFormError] = useState<string | null>(null);
   const [openSeverities, setOpenSeverities] = useState<ContradictionSeverity[]>(['high']);
   const [focusedFlowId, setFocusedFlowId] = useState<string | null>(null);
@@ -182,10 +216,29 @@ function App() {
     window.localStorage.setItem(scenarioStorageKey, selectedScenarioId);
   }, [selectedScenarioId]);
 
+  useEffect(() => {
+    window.localStorage.setItem(semanticsStorageKey, dslSource);
+  }, [dslSource]);
+
+  const dslParseResult = useMemo(() => parseWorkflowDsl(dslSource), [dslSource]);
+  const compiledSemantics = useMemo(
+    () => (dslParseResult.ast ? compileWorkflowSemantics(dslParseResult.ast, eventTypes) : null),
+    [dslParseResult],
+  );
+
+  useEffect(() => {
+    if (compiledSemantics) {
+      setActiveSemantics(compiledSemantics);
+    }
+  }, [compiledSemantics]);
+
   const orderedLedger = useMemo(() => sortEvents(ledger), [ledger]);
   const eventLookup = useMemo(() => new Map(orderedLedger.map((event) => [event.id, event])), [orderedLedger]);
-  const hypotheses = useMemo(() => deriveHypotheses(orderedLedger), [orderedLedger]);
-  const contradictions = useMemo(() => detectContradictions(orderedLedger, constraintRules), [orderedLedger]);
+  const hypotheses = useMemo(() => deriveHypotheses(orderedLedger, activeSemantics), [orderedLedger, activeSemantics]);
+  const contradictions = useMemo(
+    () => detectContradictions(orderedLedger, activeSemantics),
+    [orderedLedger, activeSemantics],
+  );
 
   useEffect(() => {
     if (contradictions.length === 0) {
@@ -301,6 +354,8 @@ function App() {
     () => demoScenarios.find((scenario) => scenario.id === selectedScenarioId) ?? demoScenarios[0],
     [selectedScenarioId],
   );
+  const semanticsPreview = compiledSemantics ?? activeSemantics;
+  const usingFallbackSemantics = compiledSemantics === null;
 
   const flowFocusOptions = useMemo(() => {
     const byFlow = new Map<
@@ -705,18 +760,90 @@ function App() {
           </form>
 
           <div className="ledger-meta">
-            <p className="section-label">Constraint rules</p>
-            <ul className="rule-list">
-              {constraintRules.map((rule) => (
-                <li key={rule.name}>
-                  <strong>{rule.name}</strong>
-                  <span>
-                    When {prettyType(rule.when)} occurs, it requires {rule.requires?.length ?? 0} and forbids{' '}
-                    {rule.forbids?.length ?? 0} conditions.
-                  </span>
-                </li>
+            <div className="panel-heading compact">
+              <div>
+                <p className="section-label">Workflow DSL</p>
+                <h3>Parser-driven semantics</h3>
+              </div>
+              <button className="ghost-button compact-button" onClick={() => setDslSource(defaultWorkflowDsl)} type="button">
+                Reset DSL
+              </button>
+            </div>
+
+            <p className="graph-caption">
+              Edit workflow semantics live. Parsed rules hot-reload contradiction detection as soon as the DSL is valid.
+            </p>
+            <div className="dsl-status-row">
+              <span className={`chip ${dslParseResult.errors.length > 0 ? 'danger' : ''}`}>
+                {dslParseResult.errors.length > 0 ? 'Parse error' : 'Live semantics'}
+              </span>
+              <span className="chip">{semanticsPreview.rules.length} rules</span>
+              <span className="chip">{semanticsPreview.declarations.length} symbols</span>
+              {usingFallbackSemantics ? <span className="chip">using last valid program</span> : null}
+            </div>
+
+            <label className="dsl-editor-label">
+              <span className="section-label">Source</span>
+              <textarea
+                className="dsl-editor"
+                value={dslSource}
+                onChange={(event) => setDslSource(event.target.value)}
+                rows={18}
+                spellCheck={false}
+              />
+            </label>
+
+            {dslParseResult.errors.length > 0 ? (
+              <ul className="rule-list compact-rule-list">
+                {dslParseResult.errors.map((error) => (
+                  <li key={`${error.line}-${error.message}`}>
+                    <strong>Line {error.line}</strong>
+                    <span>{error.message}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+
+            {semanticsPreview.warnings.length > 0 ? (
+              <ul className="rule-list compact-rule-list warning-list">
+                {semanticsPreview.warnings.map((warning) => (
+                  <li key={warning}>
+                    <strong>Compiler warning</strong>
+                    <span>{warning}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+
+            <div className="parsed-semantics">
+              {semanticsPreview.ast.workflows.map((workflow) => (
+                <section className="parsed-workflow" key={workflow.name}>
+                  <div className="parsed-workflow-header">
+                    <strong>{workflow.name}</strong>
+                    <span className="chip">
+                      {
+                        workflow.declarations.filter((declaration) => declaration.kind === 'event').length
+                      }{' '}
+                      events
+                    </span>
+                    <span className="chip">
+                      {
+                        workflow.declarations.filter((declaration) => declaration.kind === 'state').length
+                      }{' '}
+                      states
+                    </span>
+                  </div>
+                  <ul className="rule-list compact-rule-list">
+                    {workflow.rules.map((rule) => (
+                      <li key={`${workflow.name}-${rule.line}-${rule.kind}`}>
+                        <strong>{rule.kind.toUpperCase()}</strong>
+                        <span className="dsl-rule-code">{formatDslRule(rule)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
               ))}
-            </ul>
+            </div>
           </div>
 
           <div className="ledger-list">

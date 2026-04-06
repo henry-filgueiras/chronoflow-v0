@@ -576,6 +576,40 @@ export const eventTypes: EventType[] = [
   'RETURN_INITIATED',
 ];
 
+export const defaultWorkflowDsl = `workflow OrderFlow {
+  event OrderCreated
+  event PaymentAuthorized
+  event PaymentFailed
+  event InventoryReserved
+  event PackingStarted
+  event Packed
+  event Shipped
+  event DeliveryConfirmed
+  event Canceled
+  event ReturnInitiated
+
+  state ReconciliationRequired
+  state FulfillmentShouldPause
+
+  requires PackingStarted <- InventoryReserved
+  requires PackingStarted <- PaymentAuthorized
+  requires Packed <- InventoryReserved
+  requires Shipped <- Packed
+  requires Shipped <- PaymentAuthorized
+  requires DeliveryConfirmed <- Shipped
+
+  forbids Shipped <- Canceled
+  forbids DeliveryConfirmed <- Canceled
+  forbids Shipped <- PaymentFailed
+  forbids DeliveryConfirmed <- PaymentFailed
+
+  within Shipped <- PaymentAuthorized 20m
+  within DeliveryConfirmed <- Shipped 2h
+
+  implies PaymentFailed -> ReconciliationRequired
+  implies Canceled -> FulfillmentShouldPause
+}`;
+
 export const constraintRules: ConstraintRule[] = [
   {
     name: 'Shipment requires a verified pack + payment',

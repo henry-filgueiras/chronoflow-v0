@@ -1,5 +1,7 @@
 import {
-  ConstraintRule,
+  CompiledImpliesRule,
+  CompiledWorkflowRule,
+  CompiledWorkflowSemantics,
   Contradiction,
   DerivedHypothesis,
   EventRecord,
@@ -25,64 +27,97 @@ const severityRank = {
   medium: 1,
 } as const;
 
-const formatTypeLabel = (value: string) =>
+const formatSemanticLabel = (value: string) =>
   value
-    .toLowerCase()
-    .split('_')
+    .replace(/_/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .trim()
+    .split(/\s+/)
     .map((segment) => segment[0]?.toUpperCase() + segment.slice(1))
     .join(' ');
 
-const parseReference = (value: string): EventType | null => {
-  if (!value.startsWith('event:')) {
-    return null;
+const formatDuration = (durationMs: number) => {
+  if (durationMs % (60 * 60_000) === 0) {
+    return `${durationMs / (60 * 60_000)}h`;
   }
-  return value.slice('event:'.length) as EventType;
+
+  if (durationMs % 60_000 === 0) {
+    return `${durationMs / 60_000}m`;
+  }
+
+  return `${Math.round(durationMs / 1_000)}s`;
 };
 
-const buildSuggestions = (rule: ConstraintRule, event: EventRecord, missing: EventType[], forbidden: EventRecord[]) => {
-  const suggestions: ReconciliationSuggestion[] = [];
-
-  if (missing.length > 0) {
-    suggestions.push({
-      id: `${event.id}-missing`,
-      title: 'Insert or verify prerequisite events',
-      detail: `Add earlier ${missing.map(formatTypeLabel).join(', ')} records or mark ${event.type} as speculative until those prerequisites exist.`,
-    });
+const buildSuggestions = (
+  rule: CompiledWorkflowRule,
+  targetEvent: EventRecord,
+  relatedEvents: EventRecord[],
+): ReconciliationSuggestion[] => {
+  if (rule.kind === 'requires') {
+    return [
+      {
+        id: `${targetEvent.id}-requires-prereq`,
+        title: 'Insert or verify the prerequisite',
+        detail: `Confirm whether ${formatSemanticLabel(rule.sourceName)} should have occurred before ${formatSemanticLabel(rule.targetName)} and append a compensating event if telemetry is missing.`,
+      },
+      {
+        id: `${targetEvent.id}-requires-audit`,
+        title: 'Audit the causality chain',
+        detail: `Review the upstream publisher for ${targetEvent.id} and verify the event was attached to the right flow before consumers act on it.`,
+      },
+    ];
   }
 
-  if (forbidden.length > 0) {
-    suggestions.push({
-      id: `${event.id}-forbidden`,
-      title: 'Compensate or supersede the conflicting state',
-      detail: `Either void ${event.type}, append a compensating event, or reconcile the conflicting ${forbidden.map((item) => item.type).join(', ')} path in the upstream source system.`,
-    });
+  if (rule.kind === 'forbids') {
+    return [
+      {
+        id: `${targetEvent.id}-forbidden-compensate`,
+        title: 'Choose the canonical branch',
+        detail: `Decide whether ${formatSemanticLabel(rule.targetName)} or ${formatSemanticLabel(rule.sourceName)} should win, then append a compensating event so downstream consumers stop seeing both.`,
+      },
+      {
+        id: `${targetEvent.id}-forbidden-source`,
+        title: 'Quarantine the stale publisher',
+        detail: `Trace which system emitted the conflicting event and suppress replayed or out-of-order writes until the branch is reconciled.`,
+      },
+    ];
   }
 
-  if (suggestions.length === 0) {
-    suggestions.push({
-      id: `${event.id}-review`,
-      title: 'Review causality references',
-      detail: `Audit the causality chain on ${event.id} and confirm the event belongs to ${event.flowId} at ${event.ts}.`,
-    });
+  if (rule.kind === 'within') {
+    return [
+      {
+        id: `${targetEvent.id}-timing-window`,
+        title: 'Investigate stale handoff timing',
+        detail: `The elapsed time between ${formatSemanticLabel(rule.sourceName)} and ${formatSemanticLabel(rule.targetName)} exceeded ${rule.durationRaw}. Check queue lag, retries, and replayed webhooks.`,
+      },
+      {
+        id: `${targetEvent.id}-timing-adjudicate`,
+        title: 'Append an explicit adjudication marker',
+        detail: 'If the step completed outside the intended SLA, add a late-arrival or exception event so timeline readers know the breach is understood.',
+      },
+    ];
   }
 
-  if (rule.when === 'PAYMENT_FAILED') {
-    suggestions.push({
-      id: `${event.id}-payments`,
-      title: 'Open a payment reconciliation track',
-      detail: 'Decide whether the payment failure is stale telemetry or whether fulfillment needs a return / hold event to restore consistency.',
-    });
+  if (rule.kind === 'implies') {
+    return [
+      {
+        id: `${targetEvent.id}-implied-state`,
+        title: 'Materialize the implied follow-up',
+        detail: `Append an explicit ${formatSemanticLabel(rule.targetName)} marker or confirm the workflow intentionally skipped that implied state.`,
+      },
+    ];
   }
 
-  if (rule.when === 'CANCELED') {
-    suggestions.push({
-      id: `${event.id}-cancellation`,
-      title: 'Append an explicit stop-the-line marker',
-      detail: 'If downstream systems already shipped, add a compensating return or exception event so the cancellation does not remain ambiguous.',
-    });
-  }
-
-  return suggestions;
+  return relatedEvents.length > 0
+    ? [
+        {
+          id: `${targetEvent.id}-review`,
+          title: 'Review related events',
+          detail: `Inspect ${relatedEvents.map((event) => event.id).join(', ')} to determine whether the branch should be corrected or compensated.`,
+        },
+      ]
+    : [];
 };
 
 export const sortEvents = (events: EventRecord[]) =>
@@ -94,25 +129,44 @@ export const sortEvents = (events: EventRecord[]) =>
     return left.id.localeCompare(right.id);
   });
 
-export const deriveHypotheses = (events: EventRecord[]): DerivedHypothesis[] =>
+export const deriveHypotheses = (events: EventRecord[], semantics: CompiledWorkflowSemantics): DerivedHypothesis[] =>
   sortEvents(events).flatMap((event) => {
     const mapping = stateHypothesisMap[event.type];
+    const baseHypotheses: DerivedHypothesis[] = mapping
+      ? [
+          {
+            id: `hyp-${event.id}`,
+            flowId: event.flowId,
+            sourceEventId: event.id,
+            proposition: mapping.proposition,
+            validFrom: event.ts,
+            confidence: mapping.confidence,
+            kind: event.type === 'PAYMENT_FAILED' || event.type === 'CANCELED' ? 'alert' : 'state',
+          },
+        ]
+      : [];
 
-    if (!mapping) {
-      return [];
-    }
-
-    return [
-      {
-        id: `hyp-${event.id}`,
+    const impliedHypotheses = semantics.rules
+      .filter((rule): rule is CompiledImpliesRule => rule.kind === 'implies' && rule.sourceEventType === event.type)
+      .map((rule) => ({
+        id: `hyp-${event.id}-${rule.targetName}`,
         flowId: event.flowId,
         sourceEventId: event.id,
-        proposition: mapping.proposition,
+        proposition:
+          rule.targetKind === 'state'
+            ? `${formatSemanticLabel(rule.targetName)} is now expected`
+            : `${formatSemanticLabel(rule.targetName)} is implied by ${formatSemanticLabel(rule.sourceName)}`,
         validFrom: event.ts,
-        confidence: mapping.confidence,
-        kind: event.type === 'PAYMENT_FAILED' || event.type === 'CANCELED' ? 'alert' : 'state',
-      },
-    ];
+        confidence: rule.targetKind === 'state' ? 0.84 : 0.76,
+        kind:
+          /required|pause|hold|review|reconciliation/i.test(rule.targetName) ||
+          event.type === 'PAYMENT_FAILED' ||
+          event.type === 'CANCELED'
+            ? ('alert' as const)
+            : ('state' as const),
+      }));
+
+    return [...baseHypotheses, ...impliedHypotheses];
   });
 
 export const groupEventsByFlow = (events: EventRecord[]) => {
@@ -127,94 +181,173 @@ export const groupEventsByFlow = (events: EventRecord[]) => {
   return grouped;
 };
 
-export const detectContradictions = (events: EventRecord[], rules: ConstraintRule[]) => {
+export const detectContradictions = (events: EventRecord[], semantics: CompiledWorkflowSemantics) => {
   const sorted = sortEvents(events);
   const contradictions: Contradiction[] = [];
   const byFlow = groupEventsByFlow(events);
 
   for (const [flowId, flowEvents] of byFlow.entries()) {
-    for (const rule of rules) {
-      const targets = flowEvents.filter((event) => event.type === rule.when);
-
-      for (const event of targets) {
-        const earlierEvents = flowEvents.filter(
-          (candidate) => new Date(candidate.ts).getTime() <= new Date(event.ts).getTime(),
-        );
-        const missing = (rule.requires ?? [])
-          .map(parseReference)
-          .filter((candidate): candidate is EventType => candidate !== null)
-          .filter((requiredType) => !earlierEvents.some((candidate) => candidate.type === requiredType));
-
-        const forbidden = (rule.forbids ?? [])
-          .map(parseReference)
-          .filter((candidate): candidate is EventType => candidate !== null)
-          .flatMap((forbiddenType) =>
-            flowEvents.filter(
-              (candidate) =>
-                candidate.type === forbiddenType &&
-                candidate.id !== event.id,
-            ),
-          );
-
-        if (missing.length === 0 && forbidden.length === 0) {
+    for (const rule of semantics.rules) {
+      if (rule.kind === 'requires') {
+        if (!rule.targetEventType || !rule.sourceEventType) {
           continue;
         }
 
-        contradictions.push({
-          id: `cdx-${event.id}-${rule.name.replace(/\s+/g, '-').toLowerCase()}`,
-          flowId,
-          title: rule.name,
-          summary:
-            missing.length > 0
-              ? `${formatTypeLabel(event.type)} arrived without ${missing.map(formatTypeLabel).join(', ')} beforehand.`
-              : `${formatTypeLabel(event.type)} now overlaps a forbidden downstream state.`,
-          severity: missing.length > 0 || forbidden.length > 1 ? 'high' : 'medium',
-          relatedEventIds: [event.id, ...forbidden.map((item) => item.id)],
-          brokenRule: rule.name,
-          evidence: [
-            ...missing.map((item) => `Missing prerequisite: ${formatTypeLabel(item)} before ${event.id}`),
-            ...forbidden.map((item) => `Forbidden overlap: ${item.type} at ${item.ts}`),
-          ],
-          suggestions: buildSuggestions(rule, event, missing, forbidden),
-        });
-      }
-    }
+        flowEvents
+          .filter((event) => event.type === rule.targetEventType)
+          .forEach((targetEvent) => {
+            const earlierEvents = flowEvents.filter(
+              (candidate) => new Date(candidate.ts).getTime() <= new Date(targetEvent.ts).getTime(),
+            );
+            const prerequisite = earlierEvents.find((candidate) => candidate.type === rule.sourceEventType);
 
-    const cancellation = flowEvents.find((event) => event.type === 'CANCELED');
-    const delivery = flowEvents.find((event) => event.type === 'DELIVERY_CONFIRMED');
-    if (cancellation && delivery) {
-      contradictions.push({
-        id: `cdx-${flowId}-cancel-vs-delivery`,
-        flowId,
-        title: 'Canceled and delivered simultaneously',
-        summary: 'The same flow has both a cancellation path and a delivery confirmation path.',
-        severity: 'high',
-        relatedEventIds: [cancellation.id, delivery.id],
-        brokenRule: 'Mutually exclusive terminal states',
-        evidence: [
-          `${cancellation.id} marks the order canceled at ${cancellation.ts}.`,
-          `${delivery.id} claims final delivery at ${delivery.ts}.`,
-        ],
-        suggestions: [
-          {
-            id: `${flowId}-terminal-state`,
-            title: 'Choose the canonical terminal state',
-            detail: 'Append an adjudication event or rollback marker so consumers know whether cancellation or delivery won.',
-          },
-          {
-            id: `${flowId}-trace`,
-            title: 'Trace the upstream publisher',
-            detail: 'Identify whether fulfillment or customer-service systems emitted the stale terminal event and quarantine that source.',
-          },
-        ],
-      });
+            if (prerequisite) {
+              return;
+            }
+
+            contradictions.push({
+              id: `cdx-${targetEvent.id}-requires-${rule.targetName}-${rule.sourceName}`,
+              flowId,
+              title: `Requires ${rule.targetName} <- ${rule.sourceName}`,
+              summary: `${formatSemanticLabel(rule.targetName)} arrived without ${formatSemanticLabel(rule.sourceName)} earlier in the same flow.`,
+              severity: 'high',
+              relatedEventIds: [targetEvent.id],
+              brokenRule: `requires ${rule.targetName} <- ${rule.sourceName}`,
+              evidence: [`Missing prerequisite: ${formatSemanticLabel(rule.sourceName)} before ${targetEvent.id}.`],
+              suggestions: buildSuggestions(rule, targetEvent, []),
+            });
+          });
+
+        continue;
+      }
+
+      if (rule.kind === 'forbids') {
+        if (!rule.targetEventType || !rule.sourceEventType) {
+          continue;
+        }
+
+        flowEvents
+          .filter((event) => event.type === rule.targetEventType)
+          .forEach((targetEvent) => {
+            const forbiddenEvents = flowEvents.filter(
+              (candidate) => candidate.type === rule.sourceEventType && candidate.id !== targetEvent.id,
+            );
+
+            if (forbiddenEvents.length === 0) {
+              return;
+            }
+
+            contradictions.push({
+              id: `cdx-${targetEvent.id}-forbids-${rule.targetName}-${rule.sourceName}`,
+              flowId,
+              title: `Forbids ${rule.targetName} <- ${rule.sourceName}`,
+              summary: `${formatSemanticLabel(rule.targetName)} overlaps the forbidden ${formatSemanticLabel(rule.sourceName)} branch.`,
+              severity: forbiddenEvents.length > 1 ? 'high' : 'medium',
+              relatedEventIds: [targetEvent.id, ...forbiddenEvents.map((event) => event.id)],
+              brokenRule: `forbids ${rule.targetName} <- ${rule.sourceName}`,
+              evidence: forbiddenEvents.map(
+                (event) => `Forbidden overlap: ${formatSemanticLabel(rule.sourceName)} at ${event.ts}.`,
+              ),
+              suggestions: buildSuggestions(rule, targetEvent, forbiddenEvents),
+            });
+          });
+
+        continue;
+      }
+
+      if (rule.kind === 'within') {
+        if (!rule.targetEventType || !rule.sourceEventType) {
+          continue;
+        }
+
+        flowEvents
+          .filter((event) => event.type === rule.targetEventType)
+          .forEach((targetEvent) => {
+            const earlierSources = flowEvents
+              .filter(
+                (candidate) =>
+                  candidate.type === rule.sourceEventType &&
+                  new Date(candidate.ts).getTime() <= new Date(targetEvent.ts).getTime(),
+              )
+              .sort((left, right) => new Date(right.ts).getTime() - new Date(left.ts).getTime());
+
+            const sourceEvent = earlierSources[0];
+
+            if (!sourceEvent) {
+              contradictions.push({
+                id: `cdx-${targetEvent.id}-within-missing-${rule.targetName}-${rule.sourceName}`,
+                flowId,
+                title: `Within ${rule.targetName} <- ${rule.sourceName} ${rule.durationRaw}`,
+                summary: `${formatSemanticLabel(rule.targetName)} has no earlier ${formatSemanticLabel(rule.sourceName)} anchor for its timing rule.`,
+                severity: 'high',
+                relatedEventIds: [targetEvent.id],
+                brokenRule: `within ${rule.targetName} <- ${rule.sourceName} ${rule.durationRaw}`,
+                evidence: [`Missing timing anchor: ${formatSemanticLabel(rule.sourceName)} before ${targetEvent.id}.`],
+                suggestions: buildSuggestions(rule, targetEvent, []),
+              });
+              return;
+            }
+
+            const deltaMs = new Date(targetEvent.ts).getTime() - new Date(sourceEvent.ts).getTime();
+
+            if (deltaMs <= rule.durationMs) {
+              return;
+            }
+
+            contradictions.push({
+              id: `cdx-${targetEvent.id}-within-${rule.targetName}-${rule.sourceName}`,
+              flowId,
+              title: `Within ${rule.targetName} <- ${rule.sourceName} ${rule.durationRaw}`,
+              summary: `${formatSemanticLabel(rule.targetName)} happened ${formatDuration(deltaMs)} after ${formatSemanticLabel(rule.sourceName)}, exceeding ${rule.durationRaw}.`,
+              severity: 'medium',
+              relatedEventIds: [sourceEvent.id, targetEvent.id],
+              brokenRule: `within ${rule.targetName} <- ${rule.sourceName} ${rule.durationRaw}`,
+              evidence: [
+                `${sourceEvent.id} recorded ${formatSemanticLabel(rule.sourceName)} at ${sourceEvent.ts}.`,
+                `${targetEvent.id} recorded ${formatSemanticLabel(rule.targetName)} at ${targetEvent.ts}.`,
+                `Observed latency: ${formatDuration(deltaMs)}. Allowed window: ${rule.durationRaw}.`,
+              ],
+              suggestions: buildSuggestions(rule, targetEvent, [sourceEvent]),
+            });
+          });
+
+        continue;
+      }
+
+      if (rule.kind === 'implies' && rule.targetKind === 'event' && rule.sourceEventType && rule.targetEventType) {
+        flowEvents
+          .filter((event) => event.type === rule.sourceEventType)
+          .forEach((sourceEvent) => {
+            const impliedEvent = flowEvents.find(
+              (candidate) =>
+                candidate.type === rule.targetEventType &&
+                new Date(candidate.ts).getTime() >= new Date(sourceEvent.ts).getTime(),
+            );
+
+            if (impliedEvent) {
+              return;
+            }
+
+            contradictions.push({
+              id: `cdx-${sourceEvent.id}-implies-${rule.sourceName}-${rule.targetName}`,
+              flowId,
+              title: `Implies ${rule.sourceName} -> ${rule.targetName}`,
+              summary: `${formatSemanticLabel(rule.sourceName)} occurred without any later ${formatSemanticLabel(rule.targetName)} event in the same flow.`,
+              severity: 'medium',
+              relatedEventIds: [sourceEvent.id],
+              brokenRule: `implies ${rule.sourceName} -> ${rule.targetName}`,
+              evidence: [`${sourceEvent.id} implies ${formatSemanticLabel(rule.targetName)} but no matching event was observed.`],
+              suggestions: buildSuggestions(rule, sourceEvent, []),
+            });
+          });
+      }
     }
   }
 
   const deduped = Array.from(
     new Map(
       contradictions.map((item) => [
-        `${item.flowId}-${item.title}-${item.relatedEventIds.slice().sort().join(',')}`,
+        `${item.flowId}-${item.brokenRule}-${item.relatedEventIds.slice().sort().join(',')}`,
         item,
       ]),
     ).values(),

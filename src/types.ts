@@ -34,6 +34,134 @@ export interface ConstraintRule {
   forbids?: string[];
 }
 
+export interface WorkflowDeclarationAst {
+  kind: 'event' | 'state';
+  name: string;
+  line: number;
+}
+
+export interface RequiresRuleAst {
+  kind: 'requires';
+  target: string;
+  source: string;
+  line: number;
+}
+
+export interface ForbidsRuleAst {
+  kind: 'forbids';
+  target: string;
+  source: string;
+  line: number;
+}
+
+export interface ImpliesRuleAst {
+  kind: 'implies';
+  source: string;
+  target: string;
+  line: number;
+}
+
+export interface WithinRuleAst {
+  kind: 'within';
+  target: string;
+  source: string;
+  durationMs: number;
+  durationRaw: string;
+  line: number;
+}
+
+export type WorkflowRuleAst = RequiresRuleAst | ForbidsRuleAst | ImpliesRuleAst | WithinRuleAst;
+
+export interface WorkflowAst {
+  name: string;
+  line: number;
+  declarations: WorkflowDeclarationAst[];
+  rules: WorkflowRuleAst[];
+}
+
+export interface WorkflowProgramAst {
+  workflows: WorkflowAst[];
+}
+
+export interface WorkflowDslParseError {
+  line: number;
+  message: string;
+}
+
+export interface WorkflowDslParseResult {
+  ast: WorkflowProgramAst | null;
+  errors: WorkflowDslParseError[];
+}
+
+export interface WorkflowEventDeclaration {
+  kind: 'event';
+  name: string;
+  eventType?: EventType;
+}
+
+export interface WorkflowStateDeclaration {
+  kind: 'state';
+  name: string;
+}
+
+export type WorkflowDeclaration = WorkflowEventDeclaration | WorkflowStateDeclaration;
+
+export interface CompiledRequiresRule {
+  kind: 'requires';
+  workflowName: string;
+  targetName: string;
+  sourceName: string;
+  targetEventType?: EventType;
+  sourceEventType?: EventType;
+  line: number;
+}
+
+export interface CompiledForbidsRule {
+  kind: 'forbids';
+  workflowName: string;
+  targetName: string;
+  sourceName: string;
+  targetEventType?: EventType;
+  sourceEventType?: EventType;
+  line: number;
+}
+
+export interface CompiledImpliesRule {
+  kind: 'implies';
+  workflowName: string;
+  sourceName: string;
+  targetName: string;
+  sourceEventType?: EventType;
+  targetEventType?: EventType;
+  targetKind: 'event' | 'state';
+  line: number;
+}
+
+export interface CompiledWithinRule {
+  kind: 'within';
+  workflowName: string;
+  targetName: string;
+  sourceName: string;
+  targetEventType?: EventType;
+  sourceEventType?: EventType;
+  durationMs: number;
+  durationRaw: string;
+  line: number;
+}
+
+export type CompiledWorkflowRule =
+  | CompiledRequiresRule
+  | CompiledForbidsRule
+  | CompiledImpliesRule
+  | CompiledWithinRule;
+
+export interface CompiledWorkflowSemantics {
+  ast: WorkflowProgramAst;
+  declarations: WorkflowDeclaration[];
+  rules: CompiledWorkflowRule[];
+  warnings: string[];
+}
+
 export interface DerivedHypothesis extends HypothesisNode {
   flowId: string;
   sourceEventId: string;
