@@ -554,23 +554,61 @@ button {
 
 .swimlane-label,
 .swimlane-count,
+.slot-flow-label,
 .tick-label,
-.cluster-label,
-.node-subtitle {
+.sparkline-label {
   font-family: 'IBM Plex Mono', monospace;
 }
 
 .time-band {
-  fill: rgba(121, 197, 199, 0.03);
+  fill: rgba(121, 197, 199, 0.024);
 }
 
 .time-band.odd {
-  fill: rgba(255, 182, 110, 0.035);
+  fill: rgba(255, 182, 110, 0.03);
+}
+
+.sparkline-shell {
+  fill: rgba(7, 17, 28, 0.78);
+  stroke: rgba(145, 176, 198, 0.12);
+}
+
+.sparkline-label {
+  fill: var(--accent-strong);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.sparkline-area {
+  fill: rgba(255, 109, 109, 0.14);
+}
+
+.sparkline-line {
+  fill: none;
+  stroke: rgba(255, 158, 158, 0.88);
+  stroke-width: 1.8;
+}
+
+.timeline-focus-window {
+  fill: rgba(150, 240, 239, 0.045);
+  stroke: rgba(150, 240, 239, 0.16);
+}
+
+.conflict-heat {
+  fill: rgba(255, 130, 130, 0.18);
+}
+
+.conflict-heat.high {
+  fill: rgba(255, 109, 109, 0.24);
+}
+
+.conflict-heat.medium {
+  fill: rgba(255, 182, 110, 0.18);
 }
 
 .swimlane-band {
-  fill: rgba(9, 24, 37, 0.44);
-  stroke: rgba(138, 167, 188, 0.06);
+  fill: rgba(8, 22, 35, 0.36);
+  stroke: rgba(138, 167, 188, 0.08);
 }
 
 .swimlane-label {
@@ -589,6 +627,11 @@ button {
   stroke-width: 1;
 }
 
+.slot-divider {
+  stroke: rgba(128, 155, 174, 0.08);
+  stroke-width: 1;
+}
+
 .tick-line {
   stroke-dasharray: 4 8;
 }
@@ -599,98 +642,104 @@ button {
   text-anchor: middle;
 }
 
-.cluster-shell {
-  fill: rgba(121, 197, 199, 0.05);
-  stroke: rgba(121, 197, 199, 0.18);
-  stroke-dasharray: 6 6;
+.slot-label-shell {
+  fill: rgba(7, 17, 28, 0.82);
+  stroke: rgba(142, 166, 186, 0.12);
 }
 
-.cluster-group {
+.slot-label-shell.active {
+  fill: rgba(17, 43, 57, 0.9);
+  stroke: rgba(150, 240, 239, 0.32);
+}
+
+.slot-flow-label {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.slot-flow-label.active {
+  fill: var(--accent-strong);
+}
+
+.lineage-link {
+  fill: none;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.92;
+}
+
+.lineage-link.sequence {
+  stroke-dasharray: 5 5;
+}
+
+.timeline-event {
   cursor: pointer;
 }
 
-.cluster-hitbox {
+.timeline-event-hitbox {
   fill: rgba(0, 0, 0, 0.001);
 }
 
-.cluster-group:hover .cluster-shell {
-  fill: rgba(121, 197, 199, 0.08);
-  stroke: rgba(150, 240, 239, 0.3);
+.timeline-event-shell {
+  fill: rgba(10, 24, 38, 0.96);
+  stroke: rgba(137, 166, 185, 0.18);
+  stroke-width: 1.1;
+  transition: fill 120ms ease, stroke 120ms ease;
 }
 
-.cluster-group.active .cluster-shell {
-  fill: rgba(121, 197, 199, 0.1);
-  stroke: rgba(150, 240, 239, 0.56);
+.timeline-event-icon {
+  color: var(--accent);
 }
 
-.cluster-label {
-  fill: rgba(150, 240, 239, 0.8);
-  font-size: 10.5px;
+.timeline-event:hover .timeline-event-shell,
+.timeline-event.hovered .timeline-event-shell {
+  stroke: rgba(150, 240, 239, 0.38);
 }
 
-.cluster-meta {
-  fill: var(--muted);
+.timeline-event.active .timeline-event-shell {
+  stroke: rgba(150, 240, 239, 0.82);
+  stroke-width: 1.5;
+}
+
+.timeline-event.medium .timeline-event-shell {
+  fill: rgba(52, 33, 18, 0.94);
+  stroke: rgba(255, 182, 110, 0.44);
+}
+
+.timeline-event.high .timeline-event-shell {
+  fill: rgba(53, 18, 18, 0.95);
+  stroke: rgba(255, 109, 109, 0.58);
+}
+
+.timeline-event-label,
+.timeline-event-badge-label {
   font-family: 'IBM Plex Mono', monospace;
 }
 
-.graph-edge {
-  fill: none;
-  stroke-width: 2.2;
-}
-
-.graph-edge.sequence {
-  stroke-dasharray: 7 7;
-}
-
-.graph-node {
-  cursor: pointer;
-}
-
-.graph-node rect {
-  fill: rgba(12, 28, 44, 0.98);
-  stroke: rgba(138, 167, 188, 0.16);
-  stroke-width: 1.2;
-}
-
-.graph-node:hover rect {
-  stroke: rgba(150, 240, 239, 0.36);
-}
-
-.graph-node.flagged rect {
-  fill: rgba(57, 18, 18, 0.96);
-  stroke: rgba(255, 109, 109, 0.54);
-}
-
-.graph-node.active rect {
-  stroke: rgba(150, 240, 239, 0.92);
-  stroke-width: 1.7;
-}
-
-.node-title,
-.node-subtitle,
-.node-alert {
-  text-anchor: middle;
-}
-
-.node-title {
+.timeline-event-label {
   fill: var(--text);
-  font-size: 11.5px;
-  font-weight: 700;
+  font-size: 10.6px;
+  font-weight: 500;
 }
 
-.node-subtitle {
-  fill: var(--muted);
+.timeline-event-badge {
+  fill: rgba(255, 182, 110, 0.86);
+}
+
+.timeline-event-badge.high {
+  fill: rgba(255, 109, 109, 0.9);
+}
+
+.timeline-event-badge.medium {
+  fill: rgba(255, 182, 110, 0.92);
+}
+
+.timeline-event-badge-label {
+  fill: #fff7f3;
   font-size: 10px;
-}
-
-.node-alert-badge {
-  fill: rgba(255, 109, 109, 0.88);
-}
-
-.node-alert {
-  fill: #fff4f4;
-  font-size: 11px;
   font-weight: 700;
+  text-anchor: middle;
 }
 
 .hypothesis-panel {

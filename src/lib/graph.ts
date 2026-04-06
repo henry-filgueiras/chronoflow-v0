@@ -1,7 +1,8 @@
 import {
+  ConflictHeatBand,
+  ContradictionSeverity,
   EventRecord,
   EventType,
-  GraphCluster,
   GraphEdge,
   GraphLayout,
   GraphNode,
@@ -9,15 +10,27 @@ import {
   SemanticLaneId,
   TimeBand,
   TimeBounds,
+  TimelineSparkline,
 } from '../types';
 import { groupEventsByFlow, sortEvents } from './engine';
 
-const GRAPH_WIDTH = 1440;
-const LEFT_GUTTER = 188;
-const RIGHT_GUTTER = 96;
-const GRAPH_TOP = 62;
-const LANE_GAP = 18;
+const GRAPH_WIDTH = 1600;
+const LEFT_GUTTER = 232;
+const RIGHT_GUTTER = 88;
+const SPARKLINE_TOP = 18;
+const SPARKLINE_HEIGHT = 34;
+const TIMELINE_TOP = 84;
+const LANE_GAP = 14;
+const LANE_HEADER = 18;
+const SLOT_HEIGHT = 56;
+const SLOT_GAP = 8;
+const SLOT_Y_OFFSET = 16;
+const STACK_STEP = 14;
+const EVENT_WIDTH = 132;
+const EVENT_HEIGHT = 22;
+const MAX_STACKS = 3;
 const MIN_SPAN = 10 * 60 * 1000;
+const HEAT_BINS = 24;
 
 const semanticLaneCatalog: Array<{ id: SemanticLaneId; label: string }> = [
   { id: 'payment', label: 'Payment' },
@@ -40,12 +53,24 @@ const semanticLaneByType: Record<EventType, SemanticLaneId> = {
   RETURN_INITIATED: 'reconciliation',
 };
 
-type RawNode = Omit<GraphNode, 'y' | 'stackIndex'>;
+type RawNode = Omit<GraphNode, 'y' | 'width' | 'height' | 'slotIndex' | 'severity' | 'stackIndex'>;
 
 export const GRAPH_LEFT_GUTTER = LEFT_GUTTER;
 
+const severityWeight: Record<ContradictionSeverity | 'none', number> = {
+  none: 0,
+  medium: 1.2,
+  high: 2.1,
+};
+
 export const getTimeBounds = (events: EventRecord[]): TimeBounds => {
   const ordered = sortEvents(events);
+
+  if (ordered.length === 0) {
+    const now = Date.now();
+    return { min: now, max: now + MIN_SPAN, span: MIN_SPAN };
+  }
+
   const timestamps = ordered.map((event) => new Date(event.ts).getTime());
   const min = Math.min(...timestamps);
   const max = Math.max(...timestamps);
@@ -56,10 +81,113 @@ export const getTimeBounds = (events: EventRecord[]): TimeBounds => {
 
 export const getSemanticLaneForEvent = (type: EventType) => semanticLaneByType[type];
 
-export const buildGraphLayout = (events: EventRecord[], contradictionCounts: Map<string, number>): GraphLayout => {
+const buildSparkline = (
+  values: number[],
+  usableWidth: number,
+): { heatBands: ConflictHeatBand[]; sparkline: TimelineSparkline } => {
+  const bandWidth = usableWidth / HEAT_BINS;
+  const maxValue = Math.max(...values, 0);
+  const baseY = SPARKLINE_TOP + SPARKLINE_HEIGHT;
+
+  const points = values.map((value, index) => {
+    const x = LEFT_GUTTER + index * bandWidth + bandWidth / 2;
+    const y =
+      maxValue === 0 ? baseY - 2 : baseY - 2 - (value / maxValue) * Math.max(10, SPARKLINE_HEIGHT - 10);
+
+    return { x, y, value };
+  });
+
+  const linePath =
+    points.length === 0
+      ? `M ${LEFT_GUTTER} ${baseY - 2} L ${LEFT_GUTTER + usableWidth} ${baseY - 2}`
+      : points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
+
+  const areaPath =
+    points.length === 0
+      ? `M ${LEFT_GUTTER} ${baseY - 2} L ${LEFT_GUTTER + usableWidth} ${baseY - 2} L ${LEFT_GUTTER + usableWidth} ${baseY} L ${LEFT_GUTTER} ${baseY} Z`
+      : [
+          `M ${points[0].x} ${baseY}`,
+          ...points.map((point) => `L ${point.x} ${point.y}`),
+          `L ${points[points.length - 1].x} ${baseY}`,
+          'Z',
+        ].join(' ');
+
+  const heatBands = values
+    .map((value, index) => ({
+      index,
+      x: LEFT_GUTTER + index * bandWidth,
+      width: bandWidth,
+      value,
+      intensity: maxValue === 0 ? 0 : value / maxValue,
+    }))
+    .filter((band) => band.value > 0 && band.intensity > 0.16);
+
+  return {
+    heatBands,
+    sparkline: {
+      areaPath,
+      linePath,
+      maxValue,
+    },
+  };
+};
+
+export const buildGraphLayout = (
+  events: EventRecord[],
+  contradictionCounts: Map<string, number>,
+  eventSeverities: Map<string, ContradictionSeverity>,
+): GraphLayout => {
   const ordered = sortEvents(events);
   const bounds = getTimeBounds(events);
   const usableWidth = GRAPH_WIDTH - LEFT_GUTTER - RIGHT_GUTTER;
+
+  const flowOrderByLane = new Map<SemanticLaneId, string[]>();
+  semanticLaneCatalog.forEach((lane) => flowOrderByLane.set(lane.id, []));
+
+  for (const event of events) {
+    const laneId = getSemanticLaneForEvent(event.type);
+    const flows = flowOrderByLane.get(laneId)!;
+    if (!flows.includes(event.flowId)) {
+      flows.push(event.flowId);
+    }
+  }
+
+  let currentTop = TIMELINE_TOP;
+  const lanes: SemanticLane[] = semanticLaneCatalog.map((lane) => {
+    const flowIds = flowOrderByLane.get(lane.id) ?? [];
+    const slots = (flowIds.length === 0 ? [''] : flowIds).map((flowId, index) => {
+      const top = currentTop + LANE_HEADER + index * (SLOT_HEIGHT + SLOT_GAP);
+      return {
+        flowId,
+        top,
+        center: top + SLOT_Y_OFFSET,
+        height: SLOT_HEIGHT,
+        index,
+      };
+    });
+
+    const height = LANE_HEADER + slots.length * SLOT_HEIGHT + Math.max(0, slots.length - 1) * SLOT_GAP + 14;
+    const laneLayout = {
+      id: lane.id,
+      label: lane.label,
+      top: currentTop,
+      center: currentTop + height / 2,
+      height,
+      slots,
+    };
+
+    currentTop += height + LANE_GAP;
+    return laneLayout;
+  });
+
+  const slotLookup = new Map<string, number>();
+  lanes.forEach((lane) => {
+    lane.slots.forEach((slot) => {
+      if (slot.flowId) {
+        slotLookup.set(`${lane.id}:${slot.flowId}`, slot.index);
+      }
+    });
+  });
 
   const rawNodes: RawNode[] = ordered.map((event) => {
     const laneId = getSemanticLaneForEvent(event.type);
@@ -74,118 +202,50 @@ export const buildGraphLayout = (events: EventRecord[], contradictionCounts: Map
     };
   });
 
-  const clusterNodeLookup = new Map<string, RawNode[]>();
+  const stackIndexByEventId = new Map<string, number>();
+  const groupedBySlot = new Map<string, RawNode[]>();
+
   rawNodes.forEach((node) => {
-    const bucket = clusterNodeLookup.get(node.clusterId) ?? [];
+    const key = `${node.laneId}:${node.event.flowId}`;
+    const bucket = groupedBySlot.get(key) ?? [];
     bucket.push(node);
-    clusterNodeLookup.set(node.clusterId, bucket);
+    groupedBySlot.set(key, bucket);
   });
 
-  const stackIndexByEventId = new Map<string, number>();
-  const clusterMetrics = new Map<
-    string,
-    {
-      flowId: string;
-      laneId: SemanticLaneId;
-      x1: number;
-      x2: number;
-      stackCount: number;
-      eventCount: number;
-      contradictionCount: number;
-    }
-  >();
-
-  clusterNodeLookup.forEach((clusterNodes, clusterId) => {
-    const sortedNodes = [...clusterNodes].sort((left, right) => left.x - right.x);
-    const lastXByStack: number[] = [];
+  groupedBySlot.forEach((slotNodes) => {
+    const sortedNodes = [...slotNodes].sort((left, right) => left.x - right.x);
+    const lastEndByStack = Array.from({ length: MAX_STACKS }, () => -Infinity);
 
     sortedNodes.forEach((node) => {
-      let stackIndex = lastXByStack.findIndex((lastX) => node.x - lastX > 118);
-      if (stackIndex === -1) {
-        stackIndex = lastXByStack.length;
-        lastXByStack.push(node.x);
-      } else {
-        lastXByStack[stackIndex] = node.x;
-      }
-
+      const freeStack = lastEndByStack.findIndex((endX) => node.x > endX + 10);
+      const stackIndex = freeStack === -1 ? MAX_STACKS - 1 : freeStack;
+      lastEndByStack[stackIndex] = node.x + EVENT_WIDTH;
       stackIndexByEventId.set(node.event.id, stackIndex);
     });
-
-    clusterMetrics.set(clusterId, {
-      flowId: sortedNodes[0].event.flowId,
-      laneId: sortedNodes[0].laneId,
-      x1: Math.max(LEFT_GUTTER - 4, Math.min(...sortedNodes.map((node) => node.x)) - 74),
-      x2: Math.min(GRAPH_WIDTH - RIGHT_GUTTER + 28, Math.max(...sortedNodes.map((node) => node.x)) + 74),
-      stackCount: Math.max(1, lastXByStack.length),
-      eventCount: sortedNodes.length,
-      contradictionCount: sortedNodes.reduce((sum, node) => sum + node.contradictionCount, 0),
-    });
-  });
-
-  const clusterRowLookup = new Map<string, number>();
-  const laneRowCount = new Map<SemanticLaneId, number>();
-  const laneRowHeight = new Map<SemanticLaneId, number>();
-
-  semanticLaneCatalog.forEach((lane) => {
-    const laneClusters = Array.from(clusterMetrics.entries())
-      .filter(([, cluster]) => cluster.laneId === lane.id)
-      .sort((left, right) => left[1].x1 - right[1].x1);
-
-    const rowEnds: number[] = [];
-    let maxStackCount = 1;
-
-    laneClusters.forEach(([clusterId, cluster]) => {
-      maxStackCount = Math.max(maxStackCount, cluster.stackCount);
-
-      let clusterRow = rowEnds.findIndex((rowEnd) => cluster.x1 - rowEnd > 26);
-      if (clusterRow === -1) {
-        clusterRow = rowEnds.length;
-        rowEnds.push(cluster.x2);
-      } else {
-        rowEnds[clusterRow] = cluster.x2;
-      }
-
-      clusterRowLookup.set(clusterId, clusterRow);
-    });
-
-    laneRowCount.set(lane.id, Math.max(1, rowEnds.length));
-    laneRowHeight.set(lane.id, 62 + (maxStackCount - 1) * 18);
-  });
-
-  let currentTop = GRAPH_TOP;
-  const lanes: SemanticLane[] = semanticLaneCatalog.map((lane) => {
-    const rowCount = laneRowCount.get(lane.id) ?? 1;
-    const rowHeight = laneRowHeight.get(lane.id) ?? 62;
-    const height = Math.max(102, 22 + rowCount * rowHeight + 18);
-    const laneLayout = {
-      id: lane.id,
-      label: lane.label,
-      top: currentTop,
-      center: currentTop + height / 2,
-      height,
-    };
-
-    currentTop += height + LANE_GAP;
-    return laneLayout;
   });
 
   const laneLookup = new Map(lanes.map((lane) => [lane.id, lane]));
 
   const nodes: GraphNode[] = rawNodes.map((node) => {
     const lane = laneLookup.get(node.laneId)!;
-    const clusterRow = clusterRowLookup.get(node.clusterId) ?? 0;
-    const rowHeight = laneRowHeight.get(node.laneId) ?? 62;
+    const slotIndex = slotLookup.get(`${node.laneId}:${node.event.flowId}`) ?? 0;
+    const slot = lane.slots[slotIndex] ?? lane.slots[0];
     const stackIndex = stackIndexByEventId.get(node.event.id) ?? 0;
 
     return {
       ...node,
-      y: lane.top + 30 + clusterRow * rowHeight + stackIndex * 18,
+      y: slot.top + SLOT_Y_OFFSET + stackIndex * STACK_STEP,
+      width: EVENT_WIDTH,
+      height: EVENT_HEIGHT,
+      slotIndex,
       stackIndex,
+      severity: eventSeverities.get(node.event.id) ?? 'none',
     };
   });
 
   const edges: GraphEdge[] = [];
   const byFlow = groupEventsByFlow(events);
+
   for (const flowEvents of byFlow.values()) {
     flowEvents.forEach((event, index) => {
       const previous = flowEvents[index - 1];
@@ -194,7 +254,7 @@ export const buildGraphLayout = (events: EventRecord[], contradictionCounts: Map
           id: `seq-${previous.id}-${event.id}`,
           sourceId: previous.id,
           targetId: event.id,
-          kind: 'sequence',
+          kind: 'sequence' as const,
         });
       }
 
@@ -203,47 +263,43 @@ export const buildGraphLayout = (events: EventRecord[], contradictionCounts: Map
           id: `cause-${sourceId}-${event.id}`,
           sourceId,
           targetId: event.id,
-          kind: 'causal',
+          kind: 'causal' as const,
         });
       });
     });
   }
 
-  const clusterLookup = new Map<string, GraphNode[]>();
-  nodes.forEach((node) => {
-    const bucket = clusterLookup.get(node.clusterId) ?? [];
-    bucket.push(node);
-    clusterLookup.set(node.clusterId, bucket);
+  const heatValues = Array.from({ length: HEAT_BINS }, () => 0);
+
+  ordered.forEach((event) => {
+    const contradictionCount = contradictionCounts.get(event.id) ?? 0;
+    if (contradictionCount === 0) {
+      return;
+    }
+
+    const severity = eventSeverities.get(event.id) ?? 'none';
+    const weight = contradictionCount * severityWeight[severity];
+    const normalized = bounds.span === 0 ? 0 : (new Date(event.ts).getTime() - bounds.min) / bounds.span;
+    const index = Math.min(HEAT_BINS - 1, Math.max(0, Math.floor(normalized * HEAT_BINS)));
+    heatValues[index] += weight;
   });
 
-  const clusters: GraphCluster[] = Array.from(clusterLookup.entries()).map(([clusterId, clusterNodes]) => {
-    const flowId = clusterNodes[0].event.flowId;
-    const laneId = clusterNodes[0].laneId;
-    const metrics = clusterMetrics.get(clusterId)!;
-    const minY = Math.min(...clusterNodes.map((node) => node.y)) - 24;
-    const maxY = Math.max(...clusterNodes.map((node) => node.y)) + 28;
-
-    return {
-      id: clusterId,
-      flowId,
-      laneId,
-      x1: metrics.x1,
-      x2: metrics.x2,
-      y: minY,
-      height: maxY - minY,
-      eventCount: metrics.eventCount,
-      contradictionCount: metrics.contradictionCount,
-    };
-  });
+  const { heatBands, sparkline } = buildSparkline(heatValues, usableWidth);
 
   return {
     nodes,
     edges,
     lanes,
-    clusters,
+    clusters: [],
+    heatBands,
+    sparkline,
     width: GRAPH_WIDTH,
-    height: Math.max(420, currentTop + 24),
+    height: Math.max(480, currentTop + 24),
     bounds,
+    sparklineTop: SPARKLINE_TOP,
+    sparklineHeight: SPARKLINE_HEIGHT,
+    timelineTop: TIMELINE_TOP,
+    timelineBottom: currentTop + 10,
   };
 };
 

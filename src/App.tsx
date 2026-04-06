@@ -1,8 +1,17 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { constraintRules, defaultScenarioId, demoScenarios, eventTypes, sampleLedger } from './data/sampleData';
 import { detectContradictions, deriveHypotheses, sortEvents } from './lib/engine';
 import { buildGraphLayout, buildTicks, buildTimeBands, GRAPH_LEFT_GUTTER } from './lib/graph';
-import { ContradictionSeverity, DemoScenario, EventFormState, EventRecord, GraphEdge } from './types';
+import {
+  ContradictionSeverity,
+  DemoScenario,
+  EventFormState,
+  EventRecord,
+  EventType,
+  GraphEdge,
+  GraphNode,
+  SemanticLaneId,
+} from './types';
 
 const storageKey = 'chronoflow-v0-ledger';
 const scenarioStorageKey = 'chronoflow-v0-scenario';
@@ -25,6 +34,40 @@ const prettyType = (value: string) =>
 
 const edgeStroke = (edge: GraphEdge) => (edge.kind === 'causal' ? 'var(--line-causal)' : 'var(--line-sequence)');
 
+const compactTypeLabels: Record<EventType, string> = {
+  ORDER_CREATED: 'Order',
+  INVENTORY_RESERVED: 'Reserve',
+  PAYMENT_AUTHORIZED: 'Auth OK',
+  PAYMENT_FAILED: 'Pay Fail',
+  PACKING_STARTED: 'Packing',
+  PACKED: 'Packed',
+  SHIPPED: 'Shipped',
+  DELIVERY_CONFIRMED: 'Delivered',
+  CANCELED: 'Canceled',
+  RETURN_INITIATED: 'Return',
+};
+
+const laneAccentMap: Record<SemanticLaneId, string> = {
+  payment: '#7bd7ec',
+  inventory: '#7fe89d',
+  shipment: '#ffb66e',
+  cancellation: '#ff7a7a',
+  reconciliation: '#c5ddb4',
+};
+
+const eventIconIds: Record<EventType, string> = {
+  ORDER_CREATED: 'icon-order-created',
+  INVENTORY_RESERVED: 'icon-inventory-reserved',
+  PAYMENT_AUTHORIZED: 'icon-payment-authorized',
+  PAYMENT_FAILED: 'icon-payment-failed',
+  PACKING_STARTED: 'icon-packing-started',
+  PACKED: 'icon-packed',
+  SHIPPED: 'icon-shipped',
+  DELIVERY_CONFIRMED: 'icon-delivery-confirmed',
+  CANCELED: 'icon-canceled',
+  RETURN_INITIATED: 'icon-return-initiated',
+};
+
 const formatSeverity = (value: ContradictionSeverity) => value[0].toUpperCase() + value.slice(1);
 
 const formatEventTime = (value: string) =>
@@ -42,6 +85,59 @@ const safeParsePayload = (value: string) => {
     return null;
   }
 };
+
+const EventIconDefs = () => (
+  <>
+    <symbol id="icon-order-created" viewBox="0 0 16 16">
+      <rect x="2.25" y="2.25" width="11.5" height="11.5" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M8 4.5v7M4.5 8h7" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.5" />
+    </symbol>
+    <symbol id="icon-inventory-reserved" viewBox="0 0 16 16">
+      <path d="M3.5 5.25 8 3l4.5 2.25L8 7.5Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.4" />
+      <path d="M3.5 5.25v5.5L8 13l4.5-2.25v-5.5" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.4" />
+      <path d="m6.2 8.2 1.15 1.2 2.45-2.6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.4" />
+    </symbol>
+    <symbol id="icon-payment-authorized" viewBox="0 0 16 16">
+      <rect x="2.25" y="3.25" width="11.5" height="8.5" rx="2.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M3.5 6h9" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <path d="m6.1 10 1.2 1.25 2.55-2.7" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.4" />
+    </symbol>
+    <symbol id="icon-payment-failed" viewBox="0 0 16 16">
+      <rect x="2.25" y="3.25" width="11.5" height="8.5" rx="2.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M3.5 6h9" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <path d="m6 8.35 4 4m0-4-4 4" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.4" />
+    </symbol>
+    <symbol id="icon-packing-started" viewBox="0 0 16 16">
+      <path d="M3.4 5.2 8 3l4.6 2.2L8 7.4Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.4" />
+      <path d="M3.4 5.2v5.7L8 13.1l4.6-2.2V5.2" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.4" />
+      <path d="m7 6.4 3.1 1.7L7 9.8Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.4" />
+    </symbol>
+    <symbol id="icon-packed" viewBox="0 0 16 16">
+      <path d="M3.3 5.1 8 2.8l4.7 2.3v5.8L8 13.2l-4.7-2.3Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.4" />
+      <path d="M8 2.8v10.4M3.3 5.1 8 7.5l4.7-2.4" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.4" />
+    </symbol>
+    <symbol id="icon-shipped" viewBox="0 0 16 16">
+      <path d="M2.5 5.5h7v4.2h-7Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.4" />
+      <path d="M9.5 6.6h2.2l1.8 1.7v1.4H9.5Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.4" />
+      <circle cx="5.1" cy="11.3" r="1.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="11.6" cy="11.3" r="1.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+    </symbol>
+    <symbol id="icon-delivery-confirmed" viewBox="0 0 16 16">
+      <path d="M8 13.2s4-3.5 4-6.4A4 4 0 0 0 4 6.8c0 2.9 4 6.4 4 6.4Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.4" />
+      <path d="m6.15 6.85 1.2 1.2 2.4-2.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.4" />
+    </symbol>
+    <symbol id="icon-canceled" viewBox="0 0 16 16">
+      <circle cx="8" cy="8" r="5.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <path d="m5.1 10.9 5.8-5.8" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.4" />
+    </symbol>
+    <symbol id="icon-return-initiated" viewBox="0 0 16 16">
+      <path d="M11.8 5.3A4.6 4.6 0 0 0 4.5 4.2L3 5.7" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.4" />
+      <path d="M5.2 5.7H3V3.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.4" />
+      <path d="M4.2 10.7A4.6 4.6 0 0 0 11.5 11.8L13 10.3" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.4" />
+      <path d="M10.8 10.3H13v2.2" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.4" />
+    </symbol>
+  </>
+);
 
 function App() {
   const [selectedScenarioId, setSelectedScenarioId] = useState<string>(() => {
@@ -68,6 +164,8 @@ function App() {
   const [formError, setFormError] = useState<string | null>(null);
   const [openSeverities, setOpenSeverities] = useState<ContradictionSeverity[]>(['high']);
   const [focusedFlowId, setFocusedFlowId] = useState<string | null>(null);
+  const [hoveredEventId, setHoveredEventId] = useState<string | null>(null);
+  const graphSurfaceRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     window.localStorage.setItem(storageKey, JSON.stringify(ledger));
@@ -135,12 +233,32 @@ function App() {
     return counts;
   }, [contradictions]);
 
+  const contradictionSeverities = useMemo(() => {
+    const severities = new Map<string, ContradictionSeverity>();
+
+    contradictions.forEach((item) => {
+      item.relatedEventIds.forEach((eventId) => {
+        const current = severities.get(eventId);
+        if (current === 'high') {
+          return;
+        }
+
+        severities.set(eventId, item.severity === 'high' || current === undefined ? item.severity : current);
+      });
+    });
+
+    return severities;
+  }, [contradictions]);
+
   const selectedEvent = useMemo(
     () => (selectedEventId ? eventLookup.get(selectedEventId) ?? null : null),
     [eventLookup, selectedEventId],
   );
 
-  const graph = useMemo(() => buildGraphLayout(orderedLedger, contradictionCounts), [orderedLedger, contradictionCounts]);
+  const graph = useMemo(
+    () => buildGraphLayout(ledger, contradictionCounts, contradictionSeverities),
+    [ledger, contradictionCounts, contradictionSeverities],
+  );
   const ticks = useMemo(() => buildTicks(graph.bounds), [graph.bounds]);
   const timeBands = useMemo(() => buildTimeBands(graph.bounds), [graph.bounds]);
   const nodeLookup = useMemo(() => new Map(graph.nodes.map((node) => [node.event.id, node])), [graph.nodes]);
@@ -227,24 +345,85 @@ function App() {
   }, [selectedContradiction, selectedEventId]);
 
   const highlightedFlowId = selectedContradiction?.flowId ?? selectedEvent?.flowId ?? focusedFlowId ?? null;
+  const lineageFlowId =
+    selectedContradiction?.flowId ??
+    selectedEvent?.flowId ??
+    (hoveredEventId ? eventLookup.get(hoveredEventId)?.flowId : null) ??
+    focusedFlowId ??
+    null;
+
+  const selectedTimelineRegion = useMemo(() => {
+    const targetEventIds = selectedContradiction
+      ? selectedContradiction.relatedEventIds
+      : selectedEventId
+        ? [selectedEventId]
+        : highlightedFlowId
+          ? orderedLedger.filter((event) => event.flowId === highlightedFlowId).map((event) => event.id)
+          : [];
+
+    const targetNodes = targetEventIds
+      .map((eventId) => nodeLookup.get(eventId))
+      .filter((node): node is GraphNode => Boolean(node));
+
+    if (targetNodes.length === 0) {
+      return null;
+    }
+
+    const x1 = Math.max(GRAPH_LEFT_GUTTER - 18, Math.min(...targetNodes.map((node) => node.x)) - 28);
+    const x2 = Math.min(graph.width - 30, Math.max(...targetNodes.map((node) => node.x + node.width)) + 32);
+
+    return {
+      x1,
+      x2,
+      width: x2 - x1,
+      center: (x1 + x2) / 2,
+    };
+  }, [graph.width, highlightedFlowId, nodeLookup, orderedLedger, selectedContradiction, selectedEventId]);
+
+  const visibleLineageEdges = useMemo(() => {
+    if (!lineageFlowId) {
+      return [];
+    }
+
+    return graph.edges.filter((edge) => {
+      const source = eventLookup.get(edge.sourceId);
+      const target = eventLookup.get(edge.targetId);
+      return source?.flowId === lineageFlowId && target?.flowId === lineageFlowId;
+    });
+  }, [eventLookup, graph.edges, lineageFlowId]);
+
+  useEffect(() => {
+    if (!selectedContradiction || !selectedTimelineRegion || !graphSurfaceRef.current) {
+      return;
+    }
+
+    const nextLeft = Math.max(0, selectedTimelineRegion.center - graphSurfaceRef.current.clientWidth / 2);
+    graphSurfaceRef.current.scrollTo({
+      left: nextLeft,
+      behavior: 'smooth',
+    });
+  }, [selectedContradiction, selectedTimelineRegion]);
 
   const appendEvent = (event: EventRecord) => {
     setLedger((current) => [...current, event]);
     setSelectedEventId(event.id);
     setSelectedContradictionId(null);
     setFocusedFlowId(event.flowId);
+    setHoveredEventId(null);
   };
 
   const focusFlow = (flowId: string | null) => {
     setSelectedEventId(null);
     setSelectedContradictionId(null);
     setFocusedFlowId(flowId);
+    setHoveredEventId(null);
   };
 
   const toggleFlowFocus = (flowId: string) => {
     setSelectedEventId(null);
     setSelectedContradictionId(null);
     setFocusedFlowId((current) => (current === flowId ? null : flowId));
+    setHoveredEventId(null);
   };
 
   const handleSubmit = (submitEvent: FormEvent<HTMLFormElement>) => {
@@ -286,6 +465,7 @@ function App() {
     setSelectedContradictionId(undefined);
     setOpenSeverities(['high']);
     setFocusedFlowId(null);
+    setHoveredEventId(null);
   };
 
   const resetToSample = () => {
@@ -451,6 +631,7 @@ function App() {
                     setSelectedEventId(event.id);
                     setSelectedContradictionId(null);
                     setFocusedFlowId(event.flowId);
+                    setHoveredEventId(null);
                   }}
                   type="button"
                 >
@@ -474,8 +655,8 @@ function App() {
           <section className="panel graph-panel">
             <div className="panel-heading">
               <div>
-                <p className="section-label">Temporal graph</p>
-                <h2>Causal timeline</h2>
+                <p className="section-label">Temporal trace</p>
+                <h2>Workflow timeline</h2>
               </div>
               <div className="graph-insights">
                 {graph.lanes.map((lane) => (
@@ -516,27 +697,65 @@ function App() {
               </div>
               <p className="lineage-status">
                 {highlightedFlowId
-                  ? `Focused lineage: ${highlightedFlowId}.`
-                  : 'Tip: use a lineage chip, contradiction card, or cluster shell to isolate one flow.'}
+                  ? `Focused lineage: ${highlightedFlowId}. Hover or select pills to reveal the causal trace.`
+                  : 'Tip: hover a pill or select a contradiction to reveal one lineage at a time.'}
               </p>
             </div>
 
-            <div className="graph-surface">
-              <svg viewBox={`0 0 ${graph.width} ${graph.height}`} role="img" aria-label="Temporal graph of order events">
+            <div className="graph-surface" ref={graphSurfaceRef}>
+              <svg viewBox={`0 0 ${graph.width} ${graph.height}`} role="img" aria-label="Stable swimlane timeline of order events">
                 <defs>
-                  <marker id="arrowhead" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+                  <marker id="lineage-arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
                     <path d="M0,0 L8,4 L0,8 Z" fill="var(--line-causal)" />
                   </marker>
+                  <EventIconDefs />
                 </defs>
+
+                {selectedTimelineRegion ? (
+                  <rect
+                    className="timeline-focus-window"
+                    x={selectedTimelineRegion.x1}
+                    y={12}
+                    width={selectedTimelineRegion.width}
+                    height={graph.height - 24}
+                    rx={20}
+                  />
+                ) : null}
+
+                <rect
+                  className="sparkline-shell"
+                  x={GRAPH_LEFT_GUTTER - 18}
+                  y={graph.sparklineTop - 2}
+                  width={graph.width - GRAPH_LEFT_GUTTER - 28}
+                  height={graph.sparklineHeight + 12}
+                  rx={16}
+                />
+                <text className="sparkline-label" x={28} y={graph.sparklineTop + 18}>
+                  Conflict density
+                </text>
+                <path className="sparkline-area" d={graph.sparkline.areaPath} />
+                <path className="sparkline-line" d={graph.sparkline.linePath} />
 
                 {timeBands.map((band) => (
                   <rect
                     key={band.index}
                     className={`time-band ${band.index % 2 === 0 ? 'even' : 'odd'}`}
                     x={band.x}
-                    y={42}
+                    y={graph.timelineTop - 10}
                     width={band.width}
-                    height={graph.height - 64}
+                    height={graph.timelineBottom - graph.timelineTop + 10}
+                  />
+                ))}
+
+                {graph.heatBands.map((band) => (
+                  <rect
+                    key={band.index}
+                    className={`conflict-heat ${band.intensity > 0.58 ? 'high' : 'medium'}`}
+                    x={band.x}
+                    y={graph.timelineTop - 10}
+                    width={band.width}
+                    height={graph.timelineBottom - graph.timelineTop + 10}
+                    opacity={0.08 + band.intensity * 0.24}
                   />
                 ))}
 
@@ -544,135 +763,178 @@ function App() {
                   <g key={lane.id}>
                     <rect
                       className="swimlane-band"
-                      x={GRAPH_LEFT_GUTTER - 44}
+                      x={GRAPH_LEFT_GUTTER - 52}
                       y={lane.top}
-                      width={graph.width - 208}
+                      width={graph.width - GRAPH_LEFT_GUTTER - 36}
                       height={lane.height}
                       rx={24}
                     />
-                    <text className="swimlane-label" x={28} y={lane.center - 4}>
+                    <text className="swimlane-label" x={26} y={lane.center - 5}>
                       {lane.label}
                     </text>
-                    <text className="swimlane-count" x={28} y={lane.center + 14}>
+                    <text className="swimlane-count" x={26} y={lane.center + 13}>
                       {laneEventCounts.get(lane.id) ?? 0} events
                     </text>
                     <line
                       className="lane-line"
                       x1={GRAPH_LEFT_GUTTER - 16}
                       y1={lane.top}
-                      x2={graph.width - 46}
+                      x2={graph.width - 32}
                       y2={lane.top}
                     />
                     <line
                       className="lane-line"
                       x1={GRAPH_LEFT_GUTTER - 16}
                       y1={lane.top + lane.height}
-                      x2={graph.width - 46}
+                      x2={graph.width - 32}
                       y2={lane.top + lane.height}
                     />
+                    {lane.slots.map((slot) => {
+                      const slotLabelWidth = Math.max(74, slot.flowId.length * 7 + 18);
+                      const slotActive = Boolean(slot.flowId) && highlightedFlowId === slot.flowId;
+
+                      return (
+                        <g key={`${lane.id}-${slot.flowId || 'empty'}-${slot.index}`}>
+                          {slot.flowId ? (
+                            <>
+                              <rect
+                                className={`slot-label-shell ${slotActive ? 'active' : ''}`}
+                                x={116}
+                                y={slot.center - 11}
+                                width={slotLabelWidth}
+                                height={22}
+                                rx={11}
+                              />
+                              <text className={`slot-flow-label ${slotActive ? 'active' : ''}`} x={126} y={slot.center + 4}>
+                                {slot.flowId}
+                              </text>
+                            </>
+                          ) : null}
+                          <line
+                            className="slot-divider"
+                            x1={GRAPH_LEFT_GUTTER - 16}
+                            y1={slot.top + slot.height}
+                            x2={graph.width - 32}
+                            y2={slot.top + slot.height}
+                          />
+                        </g>
+                      );
+                    })}
                   </g>
                 ))}
 
                 {ticks.map((tick) => (
                   <g key={tick.value}>
-                    <line className="tick-line" x1={tick.x} y1={42} x2={tick.x} y2={graph.height - 22} />
-                    <text className="tick-label" x={tick.x} y={24}>
+                    <line className="tick-line" x1={tick.x} y1={graph.timelineTop - 12} x2={tick.x} y2={graph.height - 22} />
+                    <text className="tick-label" x={tick.x} y={graph.timelineTop - 22}>
                       {tick.label}
                     </text>
                   </g>
                 ))}
 
-                {graph.clusters.map((cluster) => {
-                  const isDimmed = highlightedFlowId ? highlightedFlowId !== cluster.flowId : false;
-
-                  return (
-                    <g
-                      key={cluster.id}
-                      className={`cluster-group ${highlightedFlowId === cluster.flowId ? 'active' : ''}`}
-                      opacity={isDimmed ? 0.18 : 0.92}
-                      onClick={() => toggleFlowFocus(cluster.flowId)}
-                    >
-                      <rect
-                        className="cluster-hitbox"
-                        x={cluster.x1 - 10}
-                        y={cluster.y - 10}
-                        width={cluster.x2 - cluster.x1 + 20}
-                        height={cluster.height + 20}
-                        rx={22}
-                      />
-                      <rect
-                        className="cluster-shell"
-                        x={cluster.x1}
-                        y={cluster.y}
-                        width={cluster.x2 - cluster.x1}
-                        height={cluster.height}
-                        rx={18}
-                      />
-                      <text className="cluster-label" x={cluster.x1 + 14} y={cluster.y + 18}>
-                        {cluster.flowId}
-                      </text>
-                      <text className="cluster-meta" x={cluster.x1 + 14} y={cluster.y + 34}>
-                        {cluster.eventCount} events · {cluster.contradictionCount} hits
-                      </text>
-                    </g>
-                  );
-                })}
-
-                {graph.edges.map((edge) => {
+                {visibleLineageEdges.map((edge) => {
                   const source = nodeLookup.get(edge.sourceId);
                   const target = nodeLookup.get(edge.targetId);
                   if (!source || !target) {
                     return null;
                   }
 
-                  const isActive =
-                    activeEventIds.size === 0 || (activeEventIds.has(source.event.id) && activeEventIds.has(target.event.id));
-                  const midX = (source.x + target.x) / 2;
-                  const bend = edge.kind === 'causal' ? Math.max(58, Math.abs(target.y - source.y) * 0.7) : 30;
+                  const startX = source.x + source.width;
+                  const endX = target.x;
+                  const startY = source.y;
+                  const endY = target.y;
+                  const elbowX = startX + Math.max(18, (endX - startX) * 0.42);
+                  const path =
+                    edge.kind === 'sequence' && Math.abs(startY - endY) < 1
+                      ? `M ${startX} ${startY} L ${endX} ${endY}`
+                      : `M ${startX} ${startY} L ${elbowX} ${startY} L ${elbowX} ${endY} L ${endX} ${endY}`;
 
                   return (
                     <path
                       key={edge.id}
-                      className={`graph-edge ${edge.kind}`}
-                      d={`M ${source.x} ${source.y + 16} C ${midX} ${source.y + bend}, ${midX} ${target.y - bend}, ${target.x} ${
-                        target.y - 12
-                      }`}
+                      className={`lineage-link ${edge.kind}`}
+                      d={path}
                       stroke={edgeStroke(edge)}
-                      markerEnd={edge.kind === 'causal' ? 'url(#arrowhead)' : undefined}
-                      opacity={isActive ? 0.95 : 0.18}
+                      markerEnd={edge.kind === 'causal' ? 'url(#lineage-arrow)' : undefined}
                     />
                   );
                 })}
 
                 {graph.nodes.map((node) => {
                   const isRelated = activeEventIds.has(node.event.id);
+                  const isSelected = selectedEventId === node.event.id;
+                  const isHovered = hoveredEventId === node.event.id;
                   const isDimmed =
-                    (highlightedFlowId && highlightedFlowId !== node.event.flowId) ||
-                    (activeEventIds.size > 0 && !activeEventIds.has(node.event.id));
+                    Boolean(highlightedFlowId && highlightedFlowId !== node.event.flowId) &&
+                    !isRelated &&
+                    !isSelected &&
+                    !isHovered;
 
                   return (
                     <g
                       key={node.event.id}
-                      className={`graph-node ${isRelated ? 'active' : ''} ${node.contradictionCount > 0 ? 'flagged' : ''}`}
-                      opacity={isDimmed ? 0.18 : 1}
+                      className={`timeline-event ${node.severity} ${isRelated || isSelected ? 'active' : ''} ${
+                        isHovered ? 'hovered' : ''
+                      }`}
+                      opacity={isDimmed ? 0.2 : 1}
                       onClick={() => {
                         setSelectedEventId(node.event.id);
                         setFocusedFlowId(node.event.flowId);
                         const hit = contradictions.find((item) => item.relatedEventIds.includes(node.event.id));
                         setSelectedContradictionId(hit?.id ?? null);
+                        setHoveredEventId(node.event.id);
                       }}
+                      onMouseEnter={() => setHoveredEventId(node.event.id)}
+                      onMouseLeave={() => setHoveredEventId((current) => (current === node.event.id ? null : current))}
                     >
-                      <rect x={node.x - 56} y={node.y - 18} rx={18} ry={18} width={112} height={56} />
-                      <text x={node.x} y={node.y + 2} className="node-title">
-                        {prettyType(node.event.type)}
-                      </text>
-                      <text x={node.x} y={node.y + 18} className="node-subtitle">
-                        {formatEventTime(node.event.ts)}
+                      <rect
+                        className="timeline-event-hitbox"
+                        x={node.x - 4}
+                        y={node.y - node.height / 2 - 4}
+                        rx={12}
+                        ry={12}
+                        width={node.width + 8}
+                        height={node.height + 8}
+                      />
+                      <rect
+                        className="timeline-event-shell"
+                        x={node.x}
+                        y={node.y - node.height / 2}
+                        rx={11}
+                        ry={11}
+                        width={node.width}
+                        height={node.height}
+                      />
+                      <rect
+                        className="timeline-event-accent"
+                        x={node.x}
+                        y={node.y - node.height / 2}
+                        width={5}
+                        height={node.height}
+                        rx={11}
+                        fill={laneAccentMap[node.laneId]}
+                      />
+                      <use
+                        href={`#${eventIconIds[node.event.type]}`}
+                        x={node.x + 10}
+                        y={node.y - 8}
+                        width={16}
+                        height={16}
+                        className="timeline-event-icon"
+                        style={{ color: laneAccentMap[node.laneId] }}
+                      />
+                      <text x={node.x + 32} y={node.y + 4} className="timeline-event-label">
+                        {compactTypeLabels[node.event.type]}
                       </text>
                       {node.contradictionCount > 0 ? (
                         <>
-                          <circle className="node-alert-badge" cx={node.x + 42} cy={node.y - 8} r={11} />
-                          <text x={node.x + 42} y={node.y - 4} className="node-alert">
+                          <circle
+                            className={`timeline-event-badge ${node.severity}`}
+                            cx={node.x + node.width - 14}
+                            cy={node.y}
+                            r={8.5}
+                          />
+                          <text x={node.x + node.width - 14} y={node.y + 3.4} className="timeline-event-badge-label">
                             {node.contradictionCount}
                           </text>
                         </>
@@ -710,6 +972,7 @@ function App() {
                           setSelectedEventId(hypothesis.sourceEventId);
                           setFocusedFlowId(hypothesis.flowId);
                           setSelectedContradictionId(null);
+                          setHoveredEventId(null);
                         }}
                       >
                         <span className="state-time">{formatEventTime(hypothesis.validFrom)}</span>
@@ -764,11 +1027,12 @@ function App() {
                           className={`contradiction-card ${selectedContradiction?.id === item.id ? 'selected' : ''} ${
                             item.severity
                           }`}
-                          onClick={() => {
-                            setSelectedContradictionId(item.id);
-                            setSelectedEventId(null);
-                            setFocusedFlowId(item.flowId);
-                          }}
+                        onClick={() => {
+                          setSelectedContradictionId(item.id);
+                          setSelectedEventId(null);
+                          setFocusedFlowId(item.flowId);
+                          setHoveredEventId(null);
+                        }}
                         >
                           <div className="contradiction-header">
                             <span>{item.flowId}</span>
@@ -826,6 +1090,7 @@ function App() {
                         onClick={() => {
                           setSelectedEventId(eventId);
                           setFocusedFlowId(event.flowId);
+                          setHoveredEventId(null);
                         }}
                       >
                         <strong>{prettyType(event.type)}</strong>

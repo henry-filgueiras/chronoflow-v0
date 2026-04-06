@@ -76,12 +76,21 @@ export interface TimeBounds {
 
 export type SemanticLaneId = 'payment' | 'inventory' | 'shipment' | 'cancellation' | 'reconciliation';
 
+export interface LaneSlot {
+  flowId: string;
+  top: number;
+  center: number;
+  height: number;
+  index: number;
+}
+
 export interface SemanticLane {
   id: SemanticLaneId;
   label: string;
   top: number;
   center: number;
   height: number;
+  slots: LaneSlot[];
 }
 
 export interface TimeBand {
@@ -90,14 +99,32 @@ export interface TimeBand {
   width: number;
 }
 
+export interface ConflictHeatBand {
+  index: number;
+  x: number;
+  width: number;
+  value: number;
+  intensity: number;
+}
+
+export interface TimelineSparkline {
+  areaPath: string;
+  linePath: string;
+  maxValue: number;
+}
+
 export interface GraphNode {
   event: EventRecord;
   x: number;
   y: number;
+  width: number;
+  height: number;
   laneId: SemanticLaneId;
   clusterId: string;
   contradictionCount: number;
   stackIndex: number;
+  slotIndex: number;
+  severity: ContradictionSeverity | 'none';
 }
 
 export interface GraphCluster {
@@ -124,9 +151,15 @@ export interface GraphLayout {
   edges: GraphEdge[];
   lanes: SemanticLane[];
   clusters: GraphCluster[];
+  heatBands: ConflictHeatBand[];
+  sparkline: TimelineSparkline;
   width: number;
   height: number;
   bounds: TimeBounds;
+  sparklineTop: number;
+  sparklineHeight: number;
+  timelineTop: number;
+  timelineBottom: number;
 }
 
 export interface DemoScenario {
