@@ -535,8 +535,9 @@ const recoveryLoop: EventRecord[] = [
 export const demoScenarios: DemoScenario[] = [
   {
     id: 'crossed-signals',
-    name: 'Crossed Signals',
-    description: 'Mixed payment, shipping, and cancellation contradictions across three fulfillment flows.',
+    name: 'Ecommerce Incident',
+    description:
+      'A checkout is canceled, shipping keeps moving, and payment telemetry reverses late, creating an easy-to-explain storefront incident.',
     events: crossedSignals,
   },
   {
