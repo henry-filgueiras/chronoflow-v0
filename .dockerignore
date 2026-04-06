@@ -1,0 +1,5 @@
+.git
+.chronoflow
+bazel-*
+dist
+node_modules

@@ -1,0 +1,22 @@
+services:
+  chronoflow-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    working_dir: /workspace
+    command: ["bash", "/workspace/scripts/container_dev_entrypoint.sh"]
+    environment:
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
+      HOST: "0.0.0.0"
+      PORT: "4173"
+    ports:
+      - "4173:4173"
+    volumes:
+      - .:/workspace
+      - chronoflow_node_modules:/workspace/node_modules
+    stdin_open: true
+    tty: true
+
+volumes:
+  chronoflow_node_modules:

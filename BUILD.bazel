@@ -1,0 +1,111 @@
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "app_sources",
+    srcs = [
+        "index.html",
+        "package-lock.json",
+        "package.json",
+        "tsconfig.app.json",
+        "tsconfig.json",
+        "tsconfig.node.json",
+        "vite.config.ts",
+    ] + glob(["src/**"]),
+)
+
+filegroup(
+    name = "tooling_sources",
+    srcs = [
+        ".bazelignore",
+        ".bazelrc",
+        ".bazelversion",
+        ".dockerignore",
+        ".gitignore",
+        "BUILD.bazel",
+        "Dockerfile.dev",
+        "MODULE.bazel",
+        "MODULE.bazel.lock",
+        "README.md",
+        "bootstrap.sh",
+        "docker-compose.yml",
+        "setup.sh",
+    ] + glob(["scripts/**"]),
+)
+
+filegroup(
+    name = "workspace_knowledge",
+    srcs = [
+        ":app_sources",
+        ":tooling_sources",
+    ],
+)
+
+sh_binary(
+    name = "bootstrap",
+    srcs = ["scripts/bootstrap.sh"],
+)
+
+sh_binary(
+    name = "setup",
+    srcs = ["scripts/setup.sh"],
+)
+
+sh_binary(
+    name = "dev",
+    srcs = ["scripts/run_dev.sh"],
+)
+
+sh_binary(
+    name = "docker_dev_up",
+    srcs = ["scripts/docker_dev_up.sh"],
+)
+
+sh_binary(
+    name = "docker_dev_down",
+    srcs = ["scripts/docker_dev_down.sh"],
+)
+
+sh_binary(
+    name = "docker_dev_logs",
+    srcs = ["scripts/docker_dev_logs.sh"],
+)
+
+alias(
+    name = "docker_compose_up",
+    actual = ":docker_dev_up",
+)
+
+alias(
+    name = "docker_compose_down",
+    actual = ":docker_dev_down",
+)
+
+sh_binary(
+    name = "build_dist_tool",
+    srcs = ["scripts/build_dist.sh"],
+)
+
+sh_binary(
+    name = "hash_inputs_tool",
+    srcs = ["scripts/hash_inputs.sh"],
+)
+
+genrule(
+    name = "app_dist_tar",
+    srcs = [":app_sources"],
+    outs = ["chronoflow-dist.tar"],
+    cmd = "$(execpath :build_dist_tool) $@ $(locations :app_sources)",
+    local = True,
+    tools = [":build_dist_tool"],
+)
+
+genrule(
+    name = "local_stack_fingerprint",
+    srcs = [":workspace_knowledge"],
+    outs = ["local-stack.sha256"],
+    cmd = "$(execpath :hash_inputs_tool) $@ $(locations :workspace_knowledge)",
+    local = True,
+    tools = [":hash_inputs_tool"],
+)
