@@ -117,8 +117,7 @@ button {
   font-family: 'IBM Plex Mono', monospace;
 }
 
-.reel-panel,
-.legend-panel {
+.reel-panel {
   margin-bottom: 18px;
   padding: 18px;
 }
@@ -256,46 +255,6 @@ button {
 .reel-note span {
   color: var(--muted);
   line-height: 1.45;
-}
-
-.legend-strip {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  position: relative;
-  z-index: 1;
-}
-
-.legend-card {
-  padding: 16px;
-  border-radius: 22px;
-  background: rgba(7, 17, 27, 0.72);
-  border: 1px solid rgba(142, 166, 186, 0.1);
-}
-
-.legend-step {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 999px;
-  margin-bottom: 12px;
-  background: rgba(121, 197, 199, 0.14);
-  color: var(--accent-strong);
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.78rem;
-}
-
-.legend-card strong {
-  display: block;
-  margin-bottom: 8px;
-}
-
-.legend-card p {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.5;
 }
 
 .eyebrow,
@@ -759,6 +718,49 @@ button {
   margin-top: 8px;
 }
 
+.timeline-legend-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+  position: relative;
+  z-index: 1;
+}
+
+.timeline-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 0.42rem 0.78rem;
+  background: rgba(7, 17, 28, 0.68);
+  border: 1px solid rgba(142, 166, 186, 0.1);
+  color: var(--muted);
+  font-size: 0.77rem;
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.timeline-legend-symbol {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0.9rem;
+  color: var(--accent-strong);
+  font-size: 0.92rem;
+}
+
+.timeline-legend-item.contradiction .timeline-legend-symbol {
+  color: #ffb5b5;
+}
+
+.timeline-legend-item.hypothesis .timeline-legend-symbol {
+  color: #d8ebbb;
+}
+
+.timeline-legend-item.link .timeline-legend-symbol {
+  color: #ffc18a;
+}
+
 .mini-stat {
   background: rgba(121, 197, 199, 0.12);
   color: var(--accent-strong);
@@ -832,6 +834,20 @@ button {
 
 .conflict-heat.medium {
   fill: rgba(255, 182, 110, 0.18);
+}
+
+.trace-annotation line {
+  stroke: rgba(145, 176, 198, 0.16);
+  stroke-width: 1;
+  stroke-dasharray: 4 5;
+}
+
+.trace-annotation text {
+  fill: rgba(145, 176, 198, 0.42);
+  font-size: 11px;
+  font-family: 'IBM Plex Mono', monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .swimlane-band {
@@ -1151,60 +1167,6 @@ button {
   z-index: 1;
 }
 
-.tour-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 30;
-  pointer-events: none;
-}
-
-.tour-backdrop {
-  position: absolute;
-  inset: 0;
-  background: rgba(4, 8, 13, 0.68);
-  backdrop-filter: blur(2px);
-  pointer-events: auto;
-}
-
-.tour-spotlight {
-  position: fixed;
-  border-radius: 28px;
-  border: 1px solid rgba(150, 240, 239, 0.52);
-  box-shadow:
-    0 0 0 9999px rgba(4, 8, 13, 0.6),
-    0 0 0 8px rgba(150, 240, 239, 0.08),
-    0 12px 42px rgba(0, 0, 0, 0.42);
-  pointer-events: none;
-}
-
-.tour-card {
-  position: fixed;
-  padding: 18px;
-  border-radius: 24px;
-  border: 1px solid rgba(150, 240, 239, 0.18);
-  background: linear-gradient(180deg, rgba(9, 24, 38, 0.98), rgba(5, 13, 21, 0.98));
-  box-shadow: var(--shadow);
-  pointer-events: auto;
-}
-
-.tour-card h3 {
-  margin: 8px 0 10px;
-  font-size: 1.12rem;
-}
-
-.tour-card p:not(.section-label) {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.55;
-}
-
-.tour-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 16px;
-}
-
 @media (max-width: 1180px) {
   .workspace {
     grid-template-columns: 1fr;
@@ -1224,8 +1186,7 @@ button {
     align-items: flex-start;
   }
 
-  .reel-layout,
-  .legend-strip {
+  .reel-layout {
     grid-template-columns: 1fr;
   }
 
@@ -1266,13 +1227,5 @@ button {
 
   .graph-insights {
     justify-content: flex-start;
-  }
-
-  .tour-card {
-    left: 16px !important;
-    right: 16px;
-    width: auto !important;
-    top: auto !important;
-    bottom: 16px;
   }
 }

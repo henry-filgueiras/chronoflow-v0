@@ -15,7 +15,6 @@ import {
 
 const storageKey = 'chronoflow-v0-ledger';
 const scenarioStorageKey = 'chronoflow-v0-scenario';
-const tourStorageKey = 'chronoflow-v0-tour-dismissed';
 const severityOrder: ContradictionSeverity[] = ['high', 'medium'];
 
 const initialFormState = (): EventFormState => ({
@@ -140,38 +139,12 @@ const EventIconDefs = () => (
   </>
 );
 
-const readLegend = [
-  {
-    title: 'Start with one incident',
-    detail: 'Keep the seeded ecommerce failure loaded, or switch demo lineages on the left to compare different contradiction patterns.',
-  },
-  {
-    title: 'Scan left to right',
-    detail: 'Each lane is one workflow domain. Event pills stay in stable positions, and warmer background bands mean conflict is accumulating there.',
-  },
-  {
-    title: 'Open the broken moment',
-    detail: 'Pick a contradiction on the right to focus the exact time window, reveal the lineage trace, and inspect suggested reconciliations.',
-  },
-];
-
-const guidedTourSteps = [
-  {
-    target: 'story' as const,
-    title: 'Start with the seeded incident story',
-    body: 'The landing layer primes the demo with a concrete ecommerce failure: cancellation arrives, shipping continues, and payment telemetry reverses after the customer thinks the order is done.',
-  },
-  {
-    target: 'timeline' as const,
-    title: 'Read the timeline like an ops screen',
-    body: 'Time runs left to right. Lanes are stable by domain, badges show conflict counts, and faint heat bands mark timestamps where contradictions concentrate.',
-  },
-  {
-    target: 'contradictions' as const,
-    title: 'Click the contradiction to narrow the blast radius',
-    body: 'Selecting a contradiction focuses the timeline window, highlights the relevant lineage, and gives you the evidence plus next-step reconciliation hints.',
-  },
-];
+const timelineLegend = [
+  { symbol: '●', label: 'event', tone: 'event' },
+  { symbol: '◉', label: 'contradiction', tone: 'contradiction' },
+  { symbol: '△', label: 'hypothesis', tone: 'hypothesis' },
+  { symbol: '⇢', label: 'causal link on hover', tone: 'link' },
+] as const;
 
 function App() {
   const [selectedScenarioId, setSelectedScenarioId] = useState<string>(() => {
@@ -193,20 +166,12 @@ function App() {
     }
   });
   const [formState, setFormState] = useState<EventFormState>(initialFormState);
-  const [selectedContradictionId, setSelectedContradictionId] = useState<string | null | undefined>(undefined);
+  const [selectedContradictionId, setSelectedContradictionId] = useState<string | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [openSeverities, setOpenSeverities] = useState<ContradictionSeverity[]>(['high']);
   const [focusedFlowId, setFocusedFlowId] = useState<string | null>(null);
   const [hoveredEventId, setHoveredEventId] = useState<string | null>(null);
-  const [tourStep, setTourStep] = useState<number | null>(() =>
-    window.localStorage.getItem(tourStorageKey) ? null : 0,
-  );
-  const [tourRect, setTourRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
-  const reelPanelRef = useRef<HTMLElement | null>(null);
-  const scenarioPanelRef = useRef<HTMLDivElement | null>(null);
-  const timelinePanelRef = useRef<HTMLElement | null>(null);
-  const contradictionsPanelRef = useRef<HTMLElement | null>(null);
   const graphSurfaceRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -228,21 +193,13 @@ function App() {
       return;
     }
 
-    if (selectedContradictionId === undefined) {
-      setSelectedContradictionId(contradictions[0].id);
-      return;
-    }
-
     if (selectedContradictionId !== null && !contradictions.some((item) => item.id === selectedContradictionId)) {
-      setSelectedContradictionId(contradictions[0].id);
+      setSelectedContradictionId(null);
     }
   }, [contradictions, selectedContradictionId]);
 
   const selectedContradiction = useMemo(
-    () =>
-      selectedContradictionId === null
-        ? null
-        : contradictions.find((item) => item.id === selectedContradictionId) ?? contradictions[0] ?? null,
+    () => (selectedContradictionId === null ? null : contradictions.find((item) => item.id === selectedContradictionId) ?? null),
     [contradictions, selectedContradictionId],
   );
 
@@ -434,79 +391,55 @@ function App() {
     });
   }, [eventLookup, graph.edges, lineageFlowId]);
 
-  const currentTour = tourStep === null ? null : guidedTourSteps[tourStep] ?? null;
+  const inlineAnnotations = useMemo(() => {
+    const annotations: Array<{
+      id: string;
+      label: string;
+      x: number;
+      y: number;
+      x2?: number;
+      y2?: number;
+    }> = [];
 
-  const currentTourCardStyle = useMemo(() => {
-    if (!tourRect) {
-      return undefined;
-    }
+    const paymentLane = graph.lanes.find((lane) => lane.id === 'payment');
+    const shipmentLane = graph.lanes.find((lane) => lane.id === 'shipment');
+    const hotspot = [...graph.heatBands].sort((left, right) => right.intensity - left.intensity)[0];
 
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const cardWidth = Math.min(340, viewportWidth - 32);
-    let left = tourRect.left + tourRect.width + 18;
-    let top = Math.max(18, tourRect.top);
-
-    if (left + cardWidth > viewportWidth - 16) {
-      left = Math.max(16, tourRect.left - cardWidth - 18);
-    }
-
-    if (top + 230 > viewportHeight - 16) {
-      top = Math.max(16, viewportHeight - 246);
-    }
-
-    return {
-      left,
-      top,
-      width: cardWidth,
-    };
-  }, [tourRect]);
-
-  useEffect(() => {
-    if (!currentTour) {
-      setTourRect(null);
-      return;
-    }
-
-    const target =
-      currentTour.target === 'story'
-        ? reelPanelRef.current
-        : currentTour.target === 'timeline'
-          ? timelinePanelRef.current
-          : contradictionsPanelRef.current;
-
-    if (!target) {
-      return;
-    }
-
-    target.scrollIntoView({
-      behavior: 'smooth',
-      block: 'center',
-      inline: 'nearest',
-    });
-
-    const updateRect = () => {
-      const rect = target.getBoundingClientRect();
-      setTourRect({
-        top: Math.max(10, rect.top - 10),
-        left: Math.max(10, rect.left - 10),
-        width: rect.width + 20,
-        height: rect.height + 20,
+    if (paymentLane) {
+      annotations.push({
+        id: 'payment-lane',
+        label: 'payment lane',
+        x: GRAPH_LEFT_GUTTER + 124,
+        y: paymentLane.top + 28,
+        x2: GRAPH_LEFT_GUTTER + 54,
+        y2: paymentLane.top + 18,
       });
-    };
+    }
 
-    const frame = window.requestAnimationFrame(updateRect);
-    const timeout = window.setTimeout(updateRect, 220);
-    window.addEventListener('resize', updateRect);
-    window.addEventListener('scroll', updateRect, true);
+    if (shipmentLane) {
+      annotations.push({
+        id: 'shipment-lane',
+        label: 'shipment lane',
+        x: graph.width - 280,
+        y: shipmentLane.top + 28,
+        x2: graph.width - 354,
+        y2: shipmentLane.top + 18,
+      });
+    }
 
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.clearTimeout(timeout);
-      window.removeEventListener('resize', updateRect);
-      window.removeEventListener('scroll', updateRect, true);
-    };
-  }, [currentTour]);
+    if (hotspot) {
+      annotations.push({
+        id: 'contradiction-hotspot',
+        label: 'contradiction hotspot',
+        x: hotspot.x + Math.max(28, hotspot.width * 0.2),
+        y: graph.timelineTop + 18,
+        x2: hotspot.x + hotspot.width / 2,
+        y2: graph.timelineTop + 4,
+      });
+    }
+
+    return annotations;
+  }, [graph.heatBands, graph.lanes, graph.timelineTop, graph.width]);
 
   useEffect(() => {
     if (!selectedContradiction || !selectedTimelineRegion || !graphSurfaceRef.current) {
@@ -578,7 +511,7 @@ function App() {
     setLedger(scenario.events);
     setSelectedScenarioId(scenario.id);
     setSelectedEventId(null);
-    setSelectedContradictionId(undefined);
+    setSelectedContradictionId(null);
     setOpenSeverities(['high']);
     setFocusedFlowId(null);
     setHoveredEventId(null);
@@ -592,30 +525,6 @@ function App() {
     setOpenSeverities((current) =>
       current.includes(severity) ? current.filter((item) => item !== severity) : [...current, severity],
     );
-  };
-
-  const dismissTour = () => {
-    window.localStorage.setItem(tourStorageKey, 'true');
-    setTourStep(null);
-  };
-
-  const startTour = () => {
-    setTourStep(0);
-  };
-
-  const advanceTour = () => {
-    setTourStep((current) => {
-      if (current === null) {
-        return 0;
-      }
-
-      if (current >= guidedTourSteps.length - 1) {
-        window.localStorage.setItem(tourStorageKey, 'true');
-        return null;
-      }
-
-      return current + 1;
-    });
   };
 
   return (
@@ -641,9 +550,6 @@ function App() {
             <button className="primary-button" onClick={() => loadScenario(demoScenarios[0])} type="button">
               Load ecommerce incident
             </button>
-            <button className="ghost-button" onClick={startTour} type="button">
-              Open quick tour
-            </button>
           </div>
         </div>
         <div className="metrics">
@@ -662,7 +568,7 @@ function App() {
         </div>
       </header>
 
-      <section className="panel reel-panel" ref={reelPanelRef}>
+      <section className="panel reel-panel">
         <div className="panel-heading">
           <div>
             <p className="section-label">Walkthrough</p>
@@ -702,24 +608,6 @@ function App() {
         </div>
       </section>
 
-      <section className="panel legend-panel">
-        <div className="panel-heading compact">
-          <div>
-            <p className="section-label">How to read this</p>
-            <h2>Three quick cues</h2>
-          </div>
-        </div>
-        <div className="legend-strip">
-          {readLegend.map((step, index) => (
-            <article className="legend-card" key={step.title}>
-              <span className="legend-step">0{index + 1}</span>
-              <strong>{step.title}</strong>
-              <p>{step.detail}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
       <main className="workspace">
         <section className="panel left-panel">
           <div className="panel-heading">
@@ -732,7 +620,7 @@ function App() {
             </button>
           </div>
 
-          <div className="scenario-panel" ref={scenarioPanelRef}>
+          <div className="scenario-panel">
             <div className="panel-heading compact">
               <div>
                 <p className="section-label">Demo lineages</p>
@@ -871,7 +759,7 @@ function App() {
         </section>
 
         <section className="center-column">
-          <section className="panel graph-panel" ref={timelinePanelRef}>
+          <section className="panel graph-panel">
             <div className="panel-heading">
               <div>
                 <p className="section-label">Temporal trace</p>
@@ -919,6 +807,17 @@ function App() {
                   ? `Focused lineage: ${highlightedFlowId}. Hover or select pills to reveal the causal trace.`
                   : 'Tip: hover a pill or select a contradiction to reveal one lineage at a time.'}
               </p>
+            </div>
+
+            <div className="timeline-legend-strip" aria-label="Timeline legend">
+              {timelineLegend.map((item) => (
+                <span className={`timeline-legend-item ${item.tone}`} key={item.label}>
+                  <span className="timeline-legend-symbol" aria-hidden="true">
+                    {item.symbol}
+                  </span>
+                  {item.label}
+                </span>
+              ))}
             </div>
 
             <div className="graph-surface" ref={graphSurfaceRef}>
@@ -976,6 +875,17 @@ function App() {
                     height={graph.timelineBottom - graph.timelineTop + 10}
                     opacity={0.08 + band.intensity * 0.24}
                   />
+                ))}
+
+                {inlineAnnotations.map((annotation) => (
+                  <g className="trace-annotation" key={annotation.id}>
+                    {annotation.x2 !== undefined && annotation.y2 !== undefined ? (
+                      <line x1={annotation.x2} y1={annotation.y2} x2={annotation.x - 10} y2={annotation.y - 6} />
+                    ) : null}
+                    <text x={annotation.x} y={annotation.y}>
+                      {annotation.label}
+                    </text>
+                  </g>
                 ))}
 
                 {graph.lanes.map((lane) => (
@@ -1206,7 +1116,7 @@ function App() {
           </section>
         </section>
 
-        <aside className="panel right-panel" ref={contradictionsPanelRef}>
+        <aside className="panel right-panel">
           <div className="panel-heading">
             <div>
               <p className="section-label">Contradictions</p>
@@ -1371,41 +1281,11 @@ function App() {
           ) : (
             <div className="empty-state">
               <strong>No contradiction selected.</strong>
-              <p>Expand a severity bucket or click any event cluster to inspect the workflow state.</p>
+              <p>Expand a severity bucket or click an event pill to inspect the workflow state.</p>
             </div>
           )}
         </aside>
       </main>
-
-      {currentTour && tourRect ? (
-        <div className="tour-overlay" aria-live="polite">
-          <div className="tour-backdrop" onClick={dismissTour} />
-          <div
-            className="tour-spotlight"
-            style={{
-              top: tourRect.top,
-              left: tourRect.left,
-              width: tourRect.width,
-              height: tourRect.height,
-            }}
-          />
-          <div className="tour-card" role="dialog" aria-modal="true" style={currentTourCardStyle}>
-            <p className="section-label">
-              Quick tour · {tourStep! + 1}/{guidedTourSteps.length}
-            </p>
-            <h3>{currentTour.title}</h3>
-            <p>{currentTour.body}</p>
-            <div className="tour-actions">
-              <button className="ghost-button" onClick={dismissTour} type="button">
-                Skip
-              </button>
-              <button className="primary-button" onClick={advanceTour} type="button">
-                {tourStep === guidedTourSteps.length - 1 ? 'Launch dashboard' : 'Next'}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
